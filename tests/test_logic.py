@@ -146,3 +146,12 @@ def test_degenerate_guard():
     assert not _degenerate("Result", "Résultat")
     assert not _degenerate("Download the file", "Téléchargez le fichier")
     assert not _degenerate("A" * 200, "B" * 260)  # long source, proportional target
+
+
+def test_is_allcaps():
+    from qc_translate.translate import _is_allcaps
+    assert _is_allcaps("KEYS TO BUILD A SPEAKING BUSINESS")
+    assert _is_allcaps("MISSION DE CAPS")
+    assert not _is_allcaps("Keys to build a speaking business")
+    assert not _is_allcaps("CAPS offers a community")  # mostly lowercase
+    assert not _is_allcaps("42")                        # no letters

@@ -30,6 +30,18 @@ def _degenerate(src_plain: str, tgt_plain: str) -> bool:
     return len(src_plain) <= 40 and len(tgt_plain) > 3 * len(src_plain) + 40
 
 
+def _is_allcaps(text: str) -> bool:
+    """True for uppercase-dominant text (e.g. designed headings/cover titles).
+
+    Tower+ hallucinates on ALL-CAPS input (CONFÉRENCIER -> 'CONFLIENCIER'), so such
+    segments are translated in lower case and re-uppercased afterwards.
+    """
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 2:
+        return False
+    return sum(c.isupper() for c in letters) / len(letters) >= 0.8
+
+
 def build_system_prompt(cfg: Config) -> str:
     style = cfg.repo_path(cfg.glossary["style_guide"])
     guide = style.read_text(encoding="utf-8") if style.exists() else ""
@@ -99,17 +111,25 @@ class VLLMClient:
         masked_source, codes = mask_inline(seg.source_xml)
         src_plain = plain(seg.source_xml)
         temp = self.llm.get("temperature", 0.1)
+        # ALL-CAPS input makes Tower+ hallucinate; translate in lower case and restore
+        # the uppercase after (placeholders are digits, unaffected by .upper()).
+        allcaps = _is_allcaps(src_plain)
+        send_source = masked_source.lower() if allcaps else masked_source
+
+        def finalize(content: str) -> str:
+            return unmask_inline(content.upper() if allcaps else content, codes)
+
         async with self.sem:
             # Primary attempt with the full (brand/style) prompt.
             content = await self._request(client, [
                 {"role": "system", "content": system},
-                {"role": "user", "content": build_user_prompt(seg, masked_source)},
+                {"role": "user", "content": build_user_prompt(seg, send_source)},
             ], temp)
             if content is None:
                 seg.target_xml = seg.source_xml
                 seg.qa_flags.append("translation_failed")
                 return
-            target = unmask_inline(content, codes)
+            target = finalize(content)
 
             # Guard: translation-specialized models sometimes echo/translate the long
             # system prompt on short, ambiguous segments. Detect that and retry with a
@@ -118,9 +138,9 @@ class VLLMClient:
                 content = await self._request(client, [
                     {"role": "system", "content": _MINIMAL_SYSTEM.format(
                         tgt=self.cfg.language["target"])},
-                    {"role": "user", "content": masked_source},
+                    {"role": "user", "content": send_source},
                 ], 0.0)
-                target = unmask_inline(content, codes) if content else seg.source_xml
+                target = finalize(content) if content else seg.source_xml
                 if content is None or _degenerate(src_plain, plain(target)):
                     seg.target_xml = seg.source_xml
                     seg.qa_flags.append("degenerate_output")

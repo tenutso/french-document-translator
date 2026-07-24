@@ -1,41 +1,67 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- TermBase eXchange (TBX-Basic). Replace/extend with the client's brand terms.
-     Each <termEntry> maps an English source term to its required Quebec-French target.
-     Set <termNote type="administrativeStatus">forbiddenTerm</termNote> under a term to
-     mark a do-not-use variant; add <descrip type="doNotTranslate">yes</descrip> at the
-     entry level for brand names that must be kept verbatim. -->
-<martif type="TBX-Basic" xml:lang="en">
-  <martifHeader>
-    <fileDesc>
-      <sourceDesc><p>qc-translate starter glossary — Quebec French (OQLF-aligned)</p></sourceDesc>
-    </fileDesc>
-  </martifHeader>
-  <text>
-    <body>
-      <termEntry id="c1">
-        <langSet xml:lang="en"><tig><term>email</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>courriel</term></tig></langSet>
-      </termEntry>
-      <termEntry id="c2">
-        <langSet xml:lang="en"><tig><term>login</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>ouverture de session</term></tig></langSet>
-      </termEntry>
-      <termEntry id="c3">
-        <langSet xml:lang="en"><tig><term>spam</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>pourriel</term></tig></langSet>
-      </termEntry>
-      <termEntry id="c4">
-        <langSet xml:lang="en"><tig><term>download</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>télécharger</term></tig></langSet>
-      </termEntry>
-      <termEntry id="c5">
-        <langSet xml:lang="en"><tig><term>shopping cart</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>panier</term></tig></langSet>
-      </termEntry>
-      <termEntry id="c6">
-        <langSet xml:lang="en"><tig><term>feedback</term></tig></langSet>
-        <langSet xml:lang="fr"><tig><term>rétroaction</term></tig></langSet>
-      </termEntry>
-    </body>
-  </text>
-</martif>
+<!-- Generated from client guidelines by build_glossary_from_docx.py -->
+<martif type="TBX-Basic" xml:lang="en"><martifHeader><fileDesc>
+<sourceDesc><p>CAPS French Language Guidelines — Brand Lexicon</p></sourceDesc>
+</fileDesc></martifHeader><text><body>
+<termEntry id="c1"><langSet xml:lang="en"><tig><term>Academy Track</term></tig></langSet><langSet xml:lang="fr"><tig><term>Parcours</term></tig></langSet></termEntry>
+<termEntry id="c2"><langSet xml:lang="en"><tig><term>Access</term></tig></langSet><langSet xml:lang="fr"><tig><term>Accès</term></tig></langSet></termEntry>
+<termEntry id="c3"><langSet xml:lang="en"><tig><term>Accountability groups</term></tig></langSet><langSet xml:lang="fr"><tig><term>Groupes d'imputabilité</term></tig></langSet></termEntry>
+<termEntry id="c4"><langSet xml:lang="en"><tig><term>ALL-ACCESS-PASS</term></tig></langSet><langSet xml:lang="fr"><tig><term>Forfait accès illimité</term></tig></langSet></termEntry>
+<termEntry id="c5"><langSet xml:lang="en"><tig><term>Announcement</term></tig></langSet><langSet xml:lang="fr"><tig><term>Annonce</term></tig></langSet></termEntry>
+<termEntry id="c6"><langSet xml:lang="en"><tig><term>Application</term></tig></langSet><langSet xml:lang="fr"><tig><term>Demande d'adhésion</term></tig></langSet></termEntry>
+<termEntry id="c7"><langSet xml:lang="en"><tig><term>Audience</term></tig></langSet><langSet xml:lang="fr"><tig><term>Auditoire</term></tig></langSet></termEntry>
+<termEntry id="c8"><langSet xml:lang="en"><tig><term>Audience reach</term></tig></langSet><langSet xml:lang="fr"><tig><term>Portée auprès de l'auditoire</term></tig></langSet></termEntry>
+<termEntry id="c9"><langSet xml:lang="en"><tig><term>Award</term></tig></langSet><langSet xml:lang="fr"><tig><term>Prix</term></tig></langSet></termEntry>
+<termEntry id="c10"><langSet xml:lang="en"><tig><term>Behind the Mic</term></tig></langSet><langSet xml:lang="fr"><tig><term>« Behind the Mic »</term></tig></langSet></termEntry>
+<termEntry id="c11"><langSet xml:lang="en"><tig><term>Benefits</term></tig></langSet><langSet xml:lang="fr"><tig><term>Avantages</term></tig></langSet></termEntry>
+<termEntry id="c12"><langSet xml:lang="en"><tig><term>Business Development</term></tig></langSet><langSet xml:lang="fr"><tig><term>Développement des affaires</term></tig></langSet></termEntry>
+<termEntry id="c13"><langSet xml:lang="en"><tig><term>Business Starter Track</term></tig></langSet><langSet xml:lang="fr"><tig><term>Parcours « Démarrage d'entreprise »</term></tig></langSet></termEntry>
+<termEntry id="c14"><langSet xml:lang="en"><tig><term>Canadian Association of Professional Speakers</term></tig></langSet><langSet xml:lang="fr"><tig><term>Association canadienne des conférencier·ères professionnel·les</term></tig></langSet></termEntry>
+<termEntry id="c15"><langSet xml:lang="en"><tig><term>Canadian Speaking Hall of Fame</term></tig></langSet><langSet xml:lang="fr"><tig><term>Temple de la renommée (HoF) des conférencier·ères du Canada</term></tig></langSet></termEntry>
+<termEntry id="c16"><langSet xml:lang="en"><tig><term>CAPS</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS</term></tig></langSet></termEntry>
+<termEntry id="c17"><langSet xml:lang="en"><tig><term>CAPS Academy</term></tig></langSet><langSet xml:lang="fr"><tig><term>Académie CAPS</term></tig></langSet></termEntry>
+<termEntry id="c18"><langSet xml:lang="en"><tig><term>CAPS Alberta</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Alberta</term></tig></langSet></termEntry>
+<termEntry id="c19"><langSet xml:lang="en"><tig><term>CAPS Atlantic</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Atlantique</term></tig></langSet></termEntry>
+<termEntry id="c20"><langSet xml:lang="en"><tig><term>CAPS BC</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Colombie-Britannique</term></tig></langSet></termEntry>
+<termEntry id="c21"><langSet xml:lang="en"><tig><term>CAPS Convention</term></tig></langSet><langSet xml:lang="fr"><tig><term>Convention de CAPS</term></tig></langSet></termEntry>
+<termEntry id="c22"><langSet xml:lang="en"><tig><term>CAPS Foundation</term></tig></langSet><langSet xml:lang="fr"><tig><term>Fondation CAPS</term></tig></langSet></termEntry>
+<termEntry id="c23"><langSet xml:lang="en"><tig><term>CAPS Prairie Shield</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Prairie Shield</term></tig></langSet></termEntry>
+<termEntry id="c24"><langSet xml:lang="en"><tig><term>CAPS Quebec</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Québec</term></tig></langSet></termEntry>
+<termEntry id="c25"><langSet xml:lang="en"><tig><term>CAPS Toronto</term></tig></langSet><langSet xml:lang="fr"><tig><term>CAPS Toronto</term></tig></langSet></termEntry>
+<termEntry id="c26"><langSet xml:lang="en"><tig><term>Certified Speaking Professional (CSP)</term></tig></langSet><langSet xml:lang="fr"><tig><term>Certified Speaking Professional (CSP)</term></tig></langSet></termEntry>
+<termEntry id="c27"><descrip type="note">source read 'Chapiter'; alt: 'section'</descrip><langSet xml:lang="en"><tig><term>Chapter</term></tig></langSet><langSet xml:lang="fr"><tig><term>Chapitre</term></tig></langSet></termEntry>
+<termEntry id="c28"><langSet xml:lang="en"><tig><term>Convention</term></tig></langSet><langSet xml:lang="fr"><tig><term>Convention</term></tig></langSet></termEntry>
+<termEntry id="c29"><langSet xml:lang="en"><tig><term>Directory</term></tig></langSet><langSet xml:lang="fr"><tig><term>Répertoire</term></tig></langSet></termEntry>
+<termEntry id="c30"><langSet xml:lang="en"><tig><term>Early Bird</term></tig></langSet><langSet xml:lang="fr"><tig><term>inscription anticipée</term></tig></langSet></termEntry>
+<termEntry id="c31"><descrip type="note">always plural (toujours au pluriel)</descrip><langSet xml:lang="en"><tig><term>Fee</term></tig></langSet><langSet xml:lang="fr"><tig><term>Honoraires</term></tig></langSet></termEntry>
+<termEntry id="c32"><langSet xml:lang="en"><tig><term>Global Speakers Federation (GSF)</term></tig></langSet><langSet xml:lang="fr"><tig><term>Fédération mondiale des conférencier·ères (GSF)</term></tig></langSet></termEntry>
+<termEntry id="c33"><langSet xml:lang="en"><tig><term>Hall of Fame (HoF)</term></tig></langSet><langSet xml:lang="fr"><tig><term>Temple de la renommée (HoF)</term></tig></langSet></termEntry>
+<termEntry id="c34"><langSet xml:lang="en"><tig><term>Hybrid event</term></tig></langSet><langSet xml:lang="fr"><tig><term>Événement hybride</term></tig></langSet></termEntry>
+<termEntry id="c35"><descrip type="note">source had a stray '(High Income Earners GroupO'</descrip><langSet xml:lang="en"><tig><term>High Income Earners Group</term></tig></langSet><langSet xml:lang="fr"><tig><term>Groupe des hauts revenus</term></tig></langSet></termEntry>
+<termEntry id="c36"><langSet xml:lang="en"><tig><term>In-person event</term></tig></langSet><langSet xml:lang="fr"><tig><term>Événement en présentiel</term></tig></langSet></termEntry>
+<termEntry id="c37"><langSet xml:lang="en"><tig><term>Keynote Speakers</term></tig></langSet><langSet xml:lang="fr"><tig><term>Conférencier·ères</term></tig></langSet></termEntry>
+<termEntry id="c38"><langSet xml:lang="en"><tig><term>Coaches &amp; Consultants</term></tig></langSet><langSet xml:lang="fr"><tig><term>Coachs et consultant·es</term></tig></langSet></termEntry>
+<termEntry id="c39"><langSet xml:lang="en"><tig><term>Trainers &amp; Facilitators</term></tig></langSet><langSet xml:lang="fr"><tig><term>Formateur·trices et facilitateur·trices</term></tig></langSet></termEntry>
+<termEntry id="c40"><langSet xml:lang="en"><tig><term>Thought Leaders &amp; Influencers</term></tig></langSet><langSet xml:lang="fr"><tig><term>Leaders d’opinion et influenceur·euses</term></tig></langSet></termEntry>
+<termEntry id="c41"><langSet xml:lang="en"><tig><term>Learn, Share, Grow, Belong</term></tig></langSet><langSet xml:lang="fr"><tig><term>Apprendre, Partager, Grandir, Appartenir</term></tig></langSet></termEntry>
+<termEntry id="c42"><langSet xml:lang="en"><tig><term>Learning Track</term></tig></langSet><langSet xml:lang="fr"><tig><term>Parcours d'apprentissage</term></tig></langSet></termEntry>
+<termEntry id="c43"><langSet xml:lang="en"><tig><term>Main Stage</term></tig></langSet><langSet xml:lang="fr"><tig><term>Scène principale</term></tig></langSet></termEntry>
+<termEntry id="c44"><langSet xml:lang="en"><tig><term>Mastermind</term></tig></langSet><langSet xml:lang="fr"><tig><term>Groupe de réflexion stratégique</term></tig></langSet></termEntry>
+<termEntry id="c45"><langSet xml:lang="en"><tig><term>Membership</term></tig></langSet><langSet xml:lang="fr"><tig><term>Adhésion</term></tig></langSet></termEntry>
+<termEntry id="c46"><langSet xml:lang="en"><tig><term>Multi-Year Mastermind (MYMM)</term></tig></langSet><langSet xml:lang="fr"><tig><term>Groupe de réflexion stratégique pluriannuel</term></tig></langSet></termEntry>
+<termEntry id="c47"><langSet xml:lang="en"><tig><term>Multi-Year Membership</term></tig></langSet><langSet xml:lang="fr"><tig><term>adhésion pluriannuelle</term></tig></langSet></termEntry>
+<termEntry id="c48"><langSet xml:lang="en"><tig><term>Networking</term></tig></langSet><langSet xml:lang="fr"><tig><term>Réseautage</term></tig></langSet></termEntry>
+<termEntry id="c49"><langSet xml:lang="en"><tig><term>Onboarding</term></tig></langSet><langSet xml:lang="fr"><tig><term>Intégration</term></tig></langSet></termEntry>
+<termEntry id="c50"><langSet xml:lang="en"><tig><term>On-demand</term></tig></langSet><langSet xml:lang="fr"><tig><term>Sur demande</term></tig></langSet></termEntry>
+<termEntry id="c51"><langSet xml:lang="en"><tig><term>Preferred Rate</term></tig></langSet><langSet xml:lang="fr"><tig><term>tarif préférentiel</term></tig></langSet></termEntry>
+<termEntry id="c52"><langSet xml:lang="en"><tig><term>Programming</term></tig></langSet><langSet xml:lang="fr"><tig><term>Programmation</term></tig></langSet></termEntry>
+<termEntry id="c53"><langSet xml:lang="en"><tig><term>Refer</term></tig></langSet><langSet xml:lang="fr"><tig><term>Référez</term></tig></langSet></termEntry>
+<termEntry id="c54"><langSet xml:lang="en"><tig><term>Self-guided</term></tig></langSet><langSet xml:lang="fr"><tig><term>Autonome</term></tig></langSet></termEntry>
+<termEntry id="c55"><langSet xml:lang="en"><tig><term>SELF-GUIDED LEARNING TRACKS</term></tig></langSet><langSet xml:lang="fr"><tig><term>Parcours d’apprentissage autonomes</term></tig></langSet></termEntry>
+<termEntry id="c56"><langSet xml:lang="en"><tig><term>Speaker</term></tig></langSet><langSet xml:lang="fr"><tig><term>Conférencier·ère</term></tig></langSet></termEntry>
+<termEntry id="c57"><langSet xml:lang="en"><tig><term>Speaker Academy</term></tig></langSet><langSet xml:lang="fr"><tig><term>Académie des conférencier·ères</term></tig></langSet></termEntry>
+<termEntry id="c58"><descrip type="note">always plural (toujours au pluriel)</descrip><langSet xml:lang="en"><tig><term>Speaker fee</term></tig></langSet><langSet xml:lang="fr"><tig><term>Honoraires</term></tig></langSet></termEntry>
+<termEntry id="c59"><descrip type="note">normalised '.' to median dot '·'</descrip><langSet xml:lang="en"><tig><term>Speaking Business</term></tig></langSet><langSet xml:lang="fr"><tig><term>Entreprise de conférencier·ères</term></tig></langSet></termEntry>
+<termEntry id="c60"><langSet xml:lang="en"><tig><term>Speaking engagement</term></tig></langSet><langSet xml:lang="fr"><tig><term>Mandat de conférence</term></tig></langSet></termEntry>
+<termEntry id="c61"><langSet xml:lang="en"><tig><term>Workshop</term></tig></langSet><langSet xml:lang="fr"><tig><term>Atelier</term></tig></langSet></termEntry>
+</body></text></martif>

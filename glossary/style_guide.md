@@ -1,33 +1,47 @@
-# Quebec French style guide (compiled into the translation system prompt)
+# CAPS Quebec French style guide (compiled into the translation system prompt)
 
-Edit this file to encode the client's brand voice. Everything below is injected verbatim
-into the LLM system prompt, so keep it concise and imperative.
+Derived from the *CAPS French Language Guidelines*. This is injected into the LLM system
+prompt, so it is kept concise and imperative. (The guidelines' bilingual-layout and
+publishing-workflow rules are handled at document assembly, not per-segment translation.)
 
 ## Language variety
-- Target **Quebec French (français québécois, fr-CA)**, aligned with **OQLF** terminology
-  (Grand dictionnaire terminologique) and the **Termium Plus** federal standard.
-- Prefer Quebec/OQLF forms over European French, e.g.:
-  - "courriel" (not "e-mail" / "mail")
-  - "magasinage" (not "shopping")
-  - "clavardage" (not "chat")
-  - "fin de semaine" (not "week-end")
-  - "stationnement" (not "parking")
-- Use the **feminized job titles** standard in Quebec (e.g. "la directrice", "une auteure").
+- Target **Quebec French (fr-CA)**, OQLF-aligned. Prefer Quebec vocabulary, e.g.:
+  **infolettre** (newsletter), **réseautage** (networking), **congrès** (convention/large event),
+  **courriel** (email), **clavardage** (chat).
+- Translate ideas, not words — restructure sentences so they read as if written in French.
 
-## Register & tone
-- Training-manual register: clear, instructional, professional. Address the learner with
-  **"vous"** unless the client specifies otherwise.
-- Keep sentences roughly as long as the source; do not merge or split segments.
-- Preserve numbered steps, UI labels, and keyboard shortcuts exactly.
+## Inclusive (gender-neutral) French — required
+1. **Preferred:** reformulate with gender-neutral or collective terms (*les membres, l'équipe,
+   la communauté*).
+2. **When reformulation is impossible:** use the **median dot ·** for paired forms
+   (*conférencier·ère*, *membre professionnel·le*, *fier·ère*).
+3. **Speakers:** always render "speaker(s)" as **conférencier·ère(s)** (median dot). The rest of
+   the surrounding sentence may stay in the generic masculine for readability.
+4. Elsewhere, default to the **generic masculine** (not "chacune et chacun" / "toutes et tous").
+- **Never** use slashes (conférencier/ère), parentheses (conférencier(ère)), or hyphens for
+  inclusive forms — median dot only. Avoid 3+ median dots in one sentence; reformulate instead.
+- Pick one inclusive technique per document and stay consistent.
 
-## Formatting rules (critical)
-- **Reproduce every inline formatting code (tags like `<g id="1">`, `<x id="2"/>`) exactly**,
-  in the same order, wrapping the same corresponding words. Never add, drop, or renumber tags.
-- Do not translate text inside `<x/>`/`<ph/>` placeholders or bracketed variables like `{name}`.
-- Keep numbers, dates, URLs, emails, and product/brand names unchanged unless the glossary
-  says otherwise. Use the French decimal comma and non-breaking space before `: ; ! ?` and
-  in number groupings per Quebec typography.
+## Brand names — keep in English
+- Keep **CAPS, CSP, HoF, GSF** and other CAPS designations in English. Follow the Brand Lexicon
+  (glossary) for every CAPS-specific term; the glossary is authoritative and overrides these
+  rules on conflict.
 
-## Terminology
-- The provided glossary is **authoritative**: when a source term appears, use its required
-  French target. If a glossary term conflicts with these rules, the glossary wins.
+## Formatting conventions
+- **Quotation marks:** French guillemets « » with a non-breaking space inside
+  (« Démarrage d'entreprise »). Never straight English quotes " " in French text.
+- **Numbers:** thousands separator = non-breaking space (1,000 → 1 000); decimal = comma
+  (3.5 → 3,5).
+- **Dates:** March 17, 2026 → 17 mars 2026 (months lowercase).
+- **Times:** 24-hour with "h": 8:00 PM → 20 h (or 20 h 30).
+- **Currency:** sign after the number with a non-breaking space, "tax" → "taxes":
+  $87 plus tax → 87 $ plus taxes.
+- **Capitalization (lowercase in French):** job titles / board portfolios / committees
+  (*le président, la directrice générale*), days and months (*lundi, mars*), languages and
+  nationalities as adjectives (*un membre francophone, le marché canadien*).
+
+## Tone and voice
+- Warm, professional, ambitious — never mechanical or stiff. Match the CAPS brand promise:
+  **Apprendre, Partager, Grandir, Appartenir** (Learn, Share, Grow, Belong).
+- Address members with **vous** by default (use tu only if the source clearly warrants it).
+- Preserve numbered steps, UI labels, keyboard shortcuts, URLs, and emails exactly.

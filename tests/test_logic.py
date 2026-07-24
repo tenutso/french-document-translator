@@ -57,9 +57,17 @@ def test_unmask_tolerates_spacing_and_flags_missing():
 # --- glossary ----------------------------------------------------------------
 def test_glossary_match():
     gloss = Glossary.load(CFG.repo_path(CFG.glossary["tbx"]))
-    hits = gloss.match("Please check your email and empty the shopping cart.")
-    assert hits.get("email") == "courriel"
-    assert hits.get("shopping cart") == "panier"
+    hits = gloss.match("Every Speaker at the Networking event joins the Workshop.")
+    assert hits.get("Speaker") == "Conférencier·ère"
+    assert hits.get("Networking") == "Réseautage"
+    assert hits.get("Workshop") == "Atelier"
+
+
+def test_glossary_multiword_wins():
+    gloss = Glossary.load(CFG.repo_path(CFG.glossary["tbx"]))
+    hits = gloss.match("Register for the CAPS Convention today.")
+    # Longer term matched; both may be present but the multiword must map correctly.
+    assert hits.get("CAPS Convention") == "Convention de CAPS"
 
 
 # --- QA checks ---------------------------------------------------------------

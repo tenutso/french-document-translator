@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Local env / secrets
+.env
+.env.runtime
+
+# Runtime artifacts (live on the /workspace volume, never committed)
+/workspace/
+jobs/
+tm/*.sqlite
+tm/*.tmx
+*.log
+
+# Job outputs
+*.xliff
+!tests/fixtures/**

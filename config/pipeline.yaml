@@ -1,0 +1,82 @@
+# Central config for the EN -> Quebec French translation pipeline.
+# Everything environment/GPU-specific lives here so the same code runs on an L4
+# now and an A100/H100 later with only edits to this file.
+
+paths:
+  # All persistent artifacts live under /workspace (the RunPod network volume).
+  workspace: /workspace
+  okapi_home: /workspace/tools/okapi        # portable Okapi (Tikal/Rainbow)
+  java_home: /workspace/tools/jdk           # portable OpenJDK (JRE 17+)
+  tesseract_bin: tesseract                   # resolved from PATH after bootstrap
+  hf_cache: /workspace/hf-cache
+  work_dir: /workspace/jobs                  # per-job scratch (xliff, reports, media)
+
+# --- Translation LLM served by vLLM (OpenAI-compatible) ------------------------
+llm:
+  # Active profile name (see profiles below). Switch this one line to change GPU tier.
+  profile: l4
+
+  base_url: http://127.0.0.1:8000/v1
+  api_key: EMPTY                             # vLLM ignores it; must be non-empty
+  request_timeout_s: 180
+  max_concurrency: 8                         # in-flight requests to vLLM
+  max_retries: 4
+  temperature: 0.1                           # near-deterministic for translation
+  top_p: 0.9
+  # Cap output length per segment relative to source (guards runaway generations).
+  max_tokens: 1024
+
+profiles:
+  l4:
+    model: Unbabel/Tower-Plus-9B             # ~18GB bf16, fits L4 23GB
+    dtype: bfloat16
+    quantization: null
+    gpu_memory_utilization: 0.90
+    max_model_len: 8192
+    tensor_parallel_size: 1
+  a100:
+    model: Unbabel/Tower-Plus-72B
+    dtype: bfloat16
+    quantization: null                       # or "awq"/"fp8" on 48GB cards
+    gpu_memory_utilization: 0.92
+    max_model_len: 16384
+    tensor_parallel_size: 1
+
+# --- Language / register -------------------------------------------------------
+language:
+  source: en
+  target: fr-CA
+  # SRX segmentation rules used by Okapi.
+  srx: config/segmentation.srx
+
+# --- Glossary / brand voice ----------------------------------------------------
+glossary:
+  tbx: glossary/brand_glossary.tbx
+  style_guide: glossary/style_guide.md
+  # If true, a required target term missing from the translation is a QA failure.
+  enforce: true
+
+# --- Translation memory --------------------------------------------------------
+tm:
+  db: /workspace/tm/qc_translate.sqlite
+  tmx_export: /workspace/tm/qc_translate.tmx
+  fuzzy_threshold: 0.80                       # >= reuse as reference; 1.0 = exact reuse
+
+# --- Quality estimation --------------------------------------------------------
+qe:
+  enabled: true
+  model: Unbabel/wmt22-cometkiwi-da           # reference-free QE
+  # Segments scoring below this are flagged for the human reviewer first.
+  flag_below: 0.75
+  batch_size: 16
+  backtranslation:
+    enabled: false                            # optional second signal on low-QE segments
+    model: facebook/nllb-200-distilled-1.3B
+
+# --- Images --------------------------------------------------------------------
+images:
+  ocr_langs: eng                              # OCR the *source* (English) text
+  # Min OCR confidence (0-100) for a detected text block to count as "has text".
+  min_confidence: 40
+  # Suggest an FR rendering for detected in-image text via the LLM.
+  suggest_translation: true

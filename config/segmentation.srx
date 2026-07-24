@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<srx xmlns="http://www.lisa.org/srx20" version="2.0">
+  <header segmentsubflows="yes" cascade="yes">
+    <formathandle type="start" include="no"/>
+    <formathandle type="end" include="yes"/>
+    <formathandle type="isolated" include="no"/>
+  </header>
+  <body>
+    <languagerules>
+      <languagerule languagerulename="English">
+        <!-- Do NOT break after common abbreviations / titles / initials. -->
+        <rule break="no">
+          <beforebreak>\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|Co|Corp|vs|etc|e\.g|i\.e|Fig|No|Vol|pp|St|Ave)\.</beforebreak>
+          <afterbreak>\s</afterbreak>
+        </rule>
+        <!-- Do not break inside numbered/lettered lists like "1." or "a." -->
+        <rule break="no">
+          <beforebreak>\b[A-Za-z0-9]\.</beforebreak>
+          <afterbreak>\s</afterbreak>
+        </rule>
+        <!-- Break after sentence-final punctuation followed by whitespace. -->
+        <rule break="yes">
+          <beforebreak>[\.!?]+["'”’)\]]*</beforebreak>
+          <afterbreak>\s</afterbreak>
+        </rule>
+      </languagerule>
+    </languagerules>
+    <maprules>
+      <languagemap languagepattern="[Ee][Nn].*" languagerulename="English"/>
+      <languagemap languagepattern=".*" languagerulename="English"/>
+    </maprules>
+  </body>
+</srx>

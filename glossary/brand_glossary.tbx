@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TermBase eXchange (TBX-Basic). Replace/extend with the client's brand terms.
+     Each <termEntry> maps an English source term to its required Quebec-French target.
+     Set <termNote type="administrativeStatus">forbiddenTerm</termNote> under a term to
+     mark a do-not-use variant; add <descrip type="doNotTranslate">yes</descrip> at the
+     entry level for brand names that must be kept verbatim. -->
+<martif type="TBX-Basic" xml:lang="en">
+  <martifHeader>
+    <fileDesc>
+      <sourceDesc><p>qc-translate starter glossary — Quebec French (OQLF-aligned)</p></sourceDesc>
+    </fileDesc>
+  </martifHeader>
+  <text>
+    <body>
+      <termEntry id="c1">
+        <langSet xml:lang="en"><tig><term>email</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>courriel</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c2">
+        <langSet xml:lang="en"><tig><term>login</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>ouverture de session</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c3">
+        <langSet xml:lang="en"><tig><term>spam</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>pourriel</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c4">
+        <langSet xml:lang="en"><tig><term>download</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>télécharger</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c5">
+        <langSet xml:lang="en"><tig><term>shopping cart</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>panier</term></tig></langSet>
+      </termEntry>
+      <termEntry id="c6">
+        <langSet xml:lang="en"><tig><term>feedback</term></tig></langSet>
+        <langSet xml:lang="fr"><tig><term>rétroaction</term></tig></langSet>
+      </termEntry>
+    </body>
+  </text>
+</martif>

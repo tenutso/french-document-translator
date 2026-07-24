@@ -52,6 +52,26 @@ manual `export`. For local/manual use instead, `cp .env.example .env` and fill i
 
 Verify a token is visible: `source scripts/runpod_env.sh && echo "${HF_TOKEN:0:4}…"`.
 
+## Web UI (upload / status / download)
+
+A small self-serve UI to upload a source `.docx`, watch status + log, and download the review
+package — no command line needed.
+
+```bash
+bash serve.sh start     # translation engine (vLLM) must be running
+bash webui.sh           # UI on :8080 (QC_UI_PORT to change)
+```
+
+Open it over an **SSH tunnel** (it has no built-in auth and handles client documents):
+
+```bash
+ssh -L 8080:localhost:8080 <pod>     # then browse http://localhost:8080
+```
+
+The UI runs each job as a detached pipeline (translate → package) and shows an engine
+online/offline badge. It runs with `--skip-qe` (CometKiwi needs the GPU that vLLM holds); run
+`qc-translate qa <job>` separately for quality scores when the engine is stopped.
+
 ## Reviewer workflow & future updates
 
 Treat the pod as a batch engine; the reviewer works off it. The **translation memory (TM)**

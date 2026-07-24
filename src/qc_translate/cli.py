@@ -60,9 +60,15 @@ def run(
     tm.export_tmx(cfg.tm["tmx_export"], cfg.language["source"], cfg.language["target"])
 
     console.print("[bold]4/7[/] Writing target XLIFF")
+    from .xliff import codes_match
     target_xliff = out / "translated.xlf"
-    write_targets(xliff, {s.unit_id: (s.target_xml or s.source_xml) for s in segments},
-                  target_xliff)
+    # Merge-safety: if a target lost/altered its inline codes, keep the source for that
+    # unit so Okapi can always merge. QA still flags it (tag_mismatch) for the reviewer.
+    targets = {}
+    for s in segments:
+        t = s.target_xml or s.source_xml
+        targets[s.unit_id] = t if codes_match(s.source_xml, t) else s.source_xml
+    write_targets(xliff, targets, target_xliff)
 
     console.print("[bold]5/7[/] QA checks" + ("" if skip_qe else " + quality estimation"))
     qa.run_checks(cfg, segments)

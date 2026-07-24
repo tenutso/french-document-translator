@@ -12,9 +12,22 @@ import httpx
 
 from .config import Config
 from .models import Segment
-from .tm import TranslationMemory
+from .tm import TranslationMemory, plain
+from .xliff import mask_inline, unmask_inline
 
-_SENTINEL = "<<<TRANSLATION>>>"
+
+_MINIMAL_SYSTEM = ("Translate the text from English into {tgt} (Quebec French). "
+                   "Keep any ⟦N⟧ placeholders verbatim. Output only the translation.")
+
+
+def _degenerate(src_plain: str, tgt_plain: str) -> bool:
+    """Heuristic for a broken translation (e.g. the model echoed the instructions).
+
+    Fires when the target is empty, or when a short source yields a wildly longer target.
+    """
+    if not tgt_plain:
+        return True
+    return len(src_plain) <= 40 and len(tgt_plain) > 3 * len(src_plain) + 40
 
 
 def build_system_prompt(cfg: Config) -> str:
@@ -24,12 +37,16 @@ def build_system_prompt(cfg: Config) -> str:
         "You are a professional localization engine translating technical training "
         f"manuals from {cfg.language['source']} into {cfg.language['target']} "
         "(Quebec French). Translate the user's segment and output ONLY the translation, "
-        "with no preamble, quotes, or commentary. Preserve all inline XML tags exactly.\n\n"
+        "with no preamble, quotes, or commentary.\n"
+        "The text may contain placeholders like ⟦1⟧, ⟦2⟧ that stand for inline formatting. "
+        "Keep every placeholder EXACTLY as written (same digits, same ⟦⟧ characters), in the "
+        "positions that wrap the corresponding translated words. Never add, drop, renumber, "
+        "translate, or space out placeholders.\n\n"
         f"# Style guide\n{guide}"
     )
 
 
-def build_user_prompt(seg: Segment) -> str:
+def build_user_prompt(seg: Segment, masked_source: str) -> str:
     parts: list[str] = []
     if seg.glossary_hits:
         terms = "\n".join(f'- "{s}" -> "{t}"' for s, t in seg.glossary_hits.items())
@@ -38,7 +55,7 @@ def build_user_prompt(seg: Segment) -> str:
         )
     if seg.tm_fuzzy:
         refs = "\n".join(
-            f'- source: "{s}"\n  target: "{t}"  (similarity {score:.0%})'
+            f'- source: "{plain(s)}"\n  target: "{plain(t)}"  (similarity {score:.0%})'
             for s, t, score in seg.tm_fuzzy[:2]
         )
         parts.append(
@@ -46,8 +63,8 @@ def build_user_prompt(seg: Segment) -> str:
             + refs
         )
     parts.append(
-        "Translate this segment. Keep inline tags identical and in order. "
-        "Output only the translated segment:\n" + seg.source_xml
+        "Translate this segment, keeping every ⟦N⟧ placeholder verbatim. "
+        "Output only the translated segment:\n" + masked_source
     )
     return "\n\n".join(parts)
 
@@ -59,31 +76,56 @@ class VLLMClient:
         self.llm = cfg.llm
         self.sem = asyncio.Semaphore(cfg.llm.get("max_concurrency", 8))
 
-    async def _one(self, client: httpx.AsyncClient, seg: Segment, system: str) -> None:
+    async def _request(self, client: httpx.AsyncClient, messages: list[dict],
+                       temperature: float) -> str | None:
         payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": build_user_prompt(seg)},
-            ],
-            "temperature": self.llm.get("temperature", 0.1),
-            "top_p": self.llm.get("top_p", 0.9),
+            "model": self.model, "messages": messages,
+            "temperature": temperature, "top_p": self.llm.get("top_p", 0.9),
             "max_tokens": self.llm.get("max_tokens", 1024),
         }
         retries = self.llm.get("max_retries", 4)
+        for attempt in range(retries):
+            try:
+                r = await client.post("/chat/completions", json=payload)
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"].strip()
+            except (httpx.HTTPError, KeyError):
+                if attempt == retries - 1:
+                    return None
+                await asyncio.sleep(1.5 * (attempt + 1))
+        return None
+
+    async def _one(self, client: httpx.AsyncClient, seg: Segment, system: str) -> None:
+        masked_source, codes = mask_inline(seg.source_xml)
+        src_plain = plain(seg.source_xml)
+        temp = self.llm.get("temperature", 0.1)
         async with self.sem:
-            for attempt in range(retries):
-                try:
-                    r = await client.post("/chat/completions", json=payload)
-                    r.raise_for_status()
-                    seg.target_xml = r.json()["choices"][0]["message"]["content"].strip()
+            # Primary attempt with the full (brand/style) prompt.
+            content = await self._request(client, [
+                {"role": "system", "content": system},
+                {"role": "user", "content": build_user_prompt(seg, masked_source)},
+            ], temp)
+            if content is None:
+                seg.target_xml = seg.source_xml
+                seg.qa_flags.append("translation_failed")
+                return
+            target = unmask_inline(content, codes)
+
+            # Guard: translation-specialized models sometimes echo/translate the long
+            # system prompt on short, ambiguous segments. Detect that and retry with a
+            # minimal prompt; if it still misbehaves, keep the source (flagged).
+            if _degenerate(src_plain, plain(target)):
+                content = await self._request(client, [
+                    {"role": "system", "content": _MINIMAL_SYSTEM.format(
+                        tgt=self.cfg.language["target"])},
+                    {"role": "user", "content": masked_source},
+                ], 0.0)
+                target = unmask_inline(content, codes) if content else seg.source_xml
+                if content is None or _degenerate(src_plain, plain(target)):
+                    seg.target_xml = seg.source_xml
+                    seg.qa_flags.append("degenerate_output")
                     return
-                except (httpx.HTTPError, KeyError) as e:
-                    if attempt == retries - 1:
-                        seg.target_xml = seg.source_xml  # leave source; QA will flag
-                        seg.qa_flags.append(f"translation_failed:{type(e).__name__}")
-                        return
-                    await asyncio.sleep(1.5 * (attempt + 1))
+            seg.target_xml = target
 
     async def _run(self, segments: list[Segment], system: str) -> None:
         base = self.llm["base_url"]
@@ -126,6 +168,12 @@ def translate_segments(cfg: Config, segments: list[Segment], tm: TranslationMemo
     threshold = cfg.tm.get("fuzzy_threshold", 0.8)
     to_translate: list[Segment] = []
     for seg in segments:
+        # Segments with no translatable text (only inline codes / whitespace, e.g. an
+        # image-only paragraph) are passed through unchanged — sending them to the LLM
+        # wastes a call and invites hallucination.
+        if not plain(seg.source_xml):
+            seg.target_xml = seg.source_xml
+            continue
         exact = tm.exact(seg.source_xml)
         if exact is not None:
             seg.target_xml = exact

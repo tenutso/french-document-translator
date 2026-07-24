@@ -28,9 +28,13 @@ llm:
 
 profiles:
   l4:
-    model: Unbabel/Tower-Plus-9B             # ~18GB bf16, fits L4 23GB
+    # FP8 (Ada-native on the L4) halves the ~18GB bf16 weights to ~9-10GB, freeing
+    # ~11GB for KV cache. bf16 left almost no KV cache (~0.7GB), which starved
+    # concurrent requests and caused short segments to be corrupted. FP8 gives full
+    # context + stable concurrency with negligible quality loss for translation.
+    model: Unbabel/Tower-Plus-9B
     dtype: bfloat16
-    quantization: null
+    quantization: fp8
     gpu_memory_utilization: 0.90
     max_model_len: 8192
     tensor_parallel_size: 1

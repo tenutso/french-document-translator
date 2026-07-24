@@ -40,6 +40,51 @@ def _escape_text(t: str) -> str:
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+_ANY_TAG = re.compile(r"<[^>]+>")
+_PLACEHOLDER = re.compile(r"⟦\s*(\d+)\s*⟧")
+
+
+def _unescape_text(t: str) -> str:
+    return t.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+
+def mask_inline(source_xml: str) -> tuple[str, list[str]]:
+    """Replace inline codes with opaque ⟦N⟧ placeholders for the LLM.
+
+    Returns (masked_text, codes) where masked_text is natural (un-escaped) text with
+    numbered placeholders, and codes[i] is the original tag string for ⟦i+1⟧. Asking the
+    model to keep simple placeholders is far more reliable than asking it to emit XML.
+    """
+    codes: list[str] = []
+
+    def repl(m: re.Match) -> str:
+        codes.append(m.group(0))
+        return f"⟦{len(codes)}⟧"
+
+    masked = _ANY_TAG.sub(repl, source_xml)
+    return _unescape_text(masked), codes
+
+
+def unmask_inline(text: str, codes: list[str]) -> str:
+    """Rebuild inner XLIFF XML: escape the translated text, restore original codes.
+
+    Placeholders (⟦N⟧) survive XML-escaping untouched, so we escape first then swap them
+    back for the exact original tag strings. Tolerates minor spacing (⟦ 1 ⟧).
+    """
+    escaped = _escape_text(text)
+
+    def repl(m: re.Match) -> str:
+        idx = int(m.group(1))
+        return codes[idx - 1] if 1 <= idx <= len(codes) else ""
+
+    return _PLACEHOLDER.sub(repl, escaped)
+
+
+def codes_match(a_xml: str, b_xml: str) -> bool:
+    """True if two inner-XML strings carry the same inline codes in the same order."""
+    return inline_code_ids(a_xml) == inline_code_ids(b_xml)
+
+
 def inline_code_ids(xml: str) -> list[str]:
     """Ordered list of inline-code identity tokens in a source/target string.
 

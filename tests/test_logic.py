@@ -6,7 +6,8 @@ from qc_translate.models import Segment
 from qc_translate.qa import check_segment
 from qc_translate.segment_glossary import Glossary
 from qc_translate.tm import TranslationMemory, plain
-from qc_translate.xliff import inline_code_ids
+from qc_translate.xliff import (codes_match, inline_code_ids, mask_inline,
+                                unmask_inline)
 
 CFG = load_config()
 
@@ -22,6 +23,35 @@ def test_inline_code_ids_detect_drop():
     src = 'Click <g id="1">Save</g>.'
     tgt = "Cliquez sur Enregistrer."
     assert inline_code_ids(src) != inline_code_ids(tgt)
+
+
+# --- inline-code masking -----------------------------------------------------
+def test_mask_unmask_roundtrip():
+    src = 'Click <g id="1">Save</g> then <x id="2"/> now.'
+    masked, codes = mask_inline(src)
+    assert masked == "Click ⟦1⟧Save⟦2⟧ then ⟦3⟧ now."  # tags -> placeholders, text natural
+    assert len(codes) == 3
+    # Simulate a model translation that keeps the placeholders.
+    model_out = "Cliquez sur ⟦1⟧Enregistrer⟦2⟧ puis ⟦3⟧ maintenant."
+    restored = unmask_inline(model_out, codes)
+    assert codes_match(src, restored)
+    assert 'g id="1"' in restored and 'x id="2"' in restored
+
+
+def test_mask_unescapes_entities_for_model():
+    src = "Tom &amp; Jerry &lt;note&gt;"
+    masked, codes = mask_inline(src)
+    assert masked == "Tom & Jerry <note>"  # model sees natural text
+    assert unmask_inline("Tom & Jerry <note>", codes) == "Tom &amp; Jerry &lt;note&gt;"
+
+
+def test_unmask_tolerates_spacing_and_flags_missing():
+    src = 'A <g id="1">b</g> c.'
+    _, codes = mask_inline(src)
+    # Model added spaces inside placeholders — still restored.
+    assert codes_match(src, unmask_inline("A ⟦ 1 ⟧b⟦2⟧ c.", codes))
+    # Model dropped a placeholder — codes no longer match (QA will flag).
+    assert not codes_match(src, unmask_inline("A b⟦2⟧ c.", codes))
 
 
 # --- glossary ----------------------------------------------------------------
@@ -73,3 +103,15 @@ def test_tm_exact_and_fuzzy(tmp_path: Path):
 
 def test_plain_strips_tags():
     assert plain('A <g id="1">bold</g> word.') == "A bold word."
+
+
+# --- degeneracy guard --------------------------------------------------------
+def test_degenerate_guard():
+    from qc_translate.translate import _degenerate
+    # Short source, huge target (the system-prompt-echo failure mode).
+    assert _degenerate("Result", "Le texte peut contenir des marqueurs " * 5)
+    assert _degenerate("Action", "")            # empty target
+    # Legitimate translations are not flagged.
+    assert not _degenerate("Result", "Résultat")
+    assert not _degenerate("Download the file", "Téléchargez le fichier")
+    assert not _degenerate("A" * 200, "B" * 260)  # long source, proportional target

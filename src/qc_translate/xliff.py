@@ -115,6 +115,17 @@ def read_sources(path: str | Path) -> list[tuple[str, str]]:
     return out
 
 
+def read_targets(path: str | Path) -> dict[str, str]:
+    """Return {trans-unit id: target inner-xml} for units that have a <target>."""
+    tree = etree.parse(str(path))
+    out: dict[str, str] = {}
+    for tu in tree.iterfind(f".//{{{XLIFF_NS}}}trans-unit"):
+        tgt = tu.find(f"{{{XLIFF_NS}}}target")
+        if tgt is not None:
+            out[tu.get("id")] = _inner_xml(tgt)
+    return out
+
+
 def write_targets(path: str | Path, targets: dict[str, str], out_path: str | Path) -> None:
     """Write a <target> (with inner XML) into each trans-unit and save to out_path."""
     parser = etree.XMLParser(remove_blank_text=False)

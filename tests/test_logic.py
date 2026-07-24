@@ -1,4 +1,5 @@
 """Unit tests for the pure-Python pipeline logic (no Java/vLLM/GPU needed)."""
+import os
 from pathlib import Path
 
 from qc_translate.config import load_config
@@ -111,6 +112,28 @@ def test_tm_exact_and_fuzzy(tmp_path: Path):
 
 def test_plain_strips_tags():
     assert plain('A <g id="1">bold</g> word.') == "A bold word."
+
+
+# --- runpod env loading ------------------------------------------------------
+def test_load_injected_secrets_precedence(monkeypatch):
+    from qc_translate import runpod_env as re_
+    # Shell value wins over dotenv/pid1.
+    monkeypatch.setenv("HF_TOKEN", "shell_tok")
+    monkeypatch.setattr(re_, "_from_dotenv", lambda: {"HF_TOKEN": "dotenv_tok"})
+    monkeypatch.setattr(re_, "_from_pid1", lambda: {"HF_TOKEN": "pid1_tok"})
+    re_.load_injected_secrets()
+    assert os.environ["HF_TOKEN"] == "shell_tok"
+
+
+def test_load_injected_secrets_pid1_fallback_and_alias(monkeypatch):
+    from qc_translate import runpod_env as re_
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(re_, "_from_dotenv", lambda: {})
+    monkeypatch.setattr(re_, "_from_pid1", lambda: {"HF_TOKEN": "pid1_tok"})
+    re_.load_injected_secrets()
+    assert os.environ["HF_TOKEN"] == "pid1_tok"
+    assert os.environ["HUGGING_FACE_HUB_TOKEN"] == "pid1_tok"  # alias normalised
 
 
 # --- degeneracy guard --------------------------------------------------------

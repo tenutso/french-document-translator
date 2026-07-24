@@ -116,6 +116,9 @@ EOF
 # ---- 6. Pre-download model weights (optional but recommended) ----------------
 # shellcheck disable=SC1090
 source "$ENV_FILE"
+# Back-fill RunPod-injected secrets (HF_TOKEN, ...) so gated models (CometKiwi) prefetch.
+source "$REPO_DIR/scripts/runpod_env.sh"
+if [[ -n "${HF_TOKEN:-}" ]]; then log "HF token detected — gated models can download"; fi
 if [[ "${QC_SKIP_WEIGHTS:-0}" != "1" ]]; then
   log "Pre-downloading model weights to $HF_CACHE (set QC_SKIP_WEIGHTS=1 to skip)"
   python "$REPO_DIR/scripts/fetch_weights.py" || log "WARN: weight prefetch failed; will download lazily on first run"

@@ -23,6 +23,13 @@ app = typer.Typer(add_completion=False, help="EN -> Quebec French DOCX translati
 console = Console()
 
 
+@app.callback()
+def _bootstrap_env() -> None:
+    """Runs before every command: back-fill RunPod-injected secrets (HF_TOKEN, ...)."""
+    from .runpod_env import load_injected_secrets
+    load_injected_secrets()
+
+
 def _segments_from_xliff(xliff: Path) -> list[Segment]:
     from .xliff import read_sources
     return [Segment(unit_id=uid, source_xml=src) for uid, src in read_sources(xliff)]
@@ -129,6 +136,39 @@ def roundtrip(
     result = okapi.merge(cfg, passthrough, out / f"{input_docx.stem}.roundtrip.docx")
     console.print(f"[green]Round-trip DOCX →[/] {result}")
     console.print("Compare it to the original in Word: layout must be identical.")
+
+
+@app.command()
+def qa(
+    job_dir: Path = typer.Argument(..., exists=True, help="Job dir containing translated.xlf"),
+    config: Path = typer.Option(None, "--config", "-c"),
+    skip_qe: bool = typer.Option(False, help="Skip CometKiwi quality estimation"),
+):
+    """Re-run QA (and CometKiwi QE) on an already-translated job — no re-translation.
+
+    Useful to add quality scores after a --skip-qe run once an HF token is available.
+    Run it when the GPU is free (vLLM stopped), since CometKiwi needs GPU memory.
+    """
+    from . import qa as qa_mod
+    from .xliff import read_sources, read_targets
+    cfg = load_config(config)
+    xlf = job_dir / "translated.xlf"
+    if not xlf.exists():
+        raise typer.BadParameter(f"{xlf} not found")
+
+    targets = read_targets(xlf)
+    segments = [Segment(unit_id=uid, source_xml=src, target_xml=targets.get(uid))
+                for uid, src in read_sources(xlf)]
+    Glossary.load(cfg.repo_path(cfg.glossary["tbx"])).annotate(segments)
+
+    qa_mod.run_checks(cfg, segments)
+    if not skip_qe:
+        console.print(f"Running CometKiwi QE on {len(segments)} segments…")
+        qa_mod.run_quality_estimation(cfg, segments)
+    out = report.write_qa_report(job_dir / "qa_report.html", job_dir.name, segments,
+                                 cfg.qe.get("flag_below", 0.75))
+    flagged = sum(1 for s in segments if s.needs_review)
+    console.print(f"[green]QA report →[/] {out}  ({flagged}/{len(segments)} flagged)")
 
 
 @app.command("export-tm")

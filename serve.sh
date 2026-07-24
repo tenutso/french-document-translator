@@ -9,6 +9,8 @@ PID_FILE="/workspace/vllm.pid"
 LOG_FILE="/workspace/vllm.log"
 
 [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" || { echo "Run bootstrap.sh first ($ENV_FILE missing)"; exit 1; }
+# Back-fill RunPod-injected secrets (HF_TOKEN, ...) so vLLM can pull gated models.
+source "$REPO_DIR/scripts/runpod_env.sh"
 
 cmd="${1:-start}"
 

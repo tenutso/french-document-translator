@@ -35,6 +35,23 @@ qc-translate run tests/fixtures/sample.docx --out /workspace/jobs/sample
 `bootstrap.sh` is idempotent and installs into `/workspace` (the persistent network volume), so
 re-spinning a pod is fast and reuses cached weights. No Docker.
 
+## Secrets & RunPod environment variables
+
+The pipeline needs `HF_TOKEN` to download **gated** models (CometKiwi QE). Tokens are resolved
+in this order (first non-empty wins): **current shell → repo `.env` → container boot env (PID 1)**.
+
+**Recommended for deploys:** set secrets in the **RunPod pod/template → Environment Variables**
+(or reference a **RunPod Secret** as `{{ RUNPOD_SECRET_hf }}`). RunPod injects those into the
+container's boot process (PID 1). A freshly-spawned shell doesn't always inherit PID 1's env,
+so the pipeline back-fills from `/proc/1/environ` automatically:
+- Python side: `qc_translate.runpod_env.load_injected_secrets()` runs before every CLI command.
+- Bash side: `scripts/runpod_env.sh` is sourced by `bootstrap.sh` and `serve.sh`.
+
+So `qc-translate …`, `bootstrap.sh`, and `serve.sh` all pick up RunPod-template tokens with no
+manual `export`. For local/manual use instead, `cp .env.example .env` and fill it in (git-ignored).
+
+Verify a token is visible: `source scripts/runpod_env.sh && echo "${HF_TOKEN:0:4}…"`.
+
 ## Configuration
 
 Everything GPU/model/path-specific lives in [`config/pipeline.yaml`](config/pipeline.yaml).

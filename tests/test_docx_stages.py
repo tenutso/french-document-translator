@@ -67,6 +67,46 @@ def test_image_location_resolution():
     assert im.thumbnail_data_uri.startswith("data:image/png;base64,")
 
 
+def _tmp_cfg(tmp_path: Path):
+    cfg = load_config()
+    cfg.raw["tm"]["db"] = str(tmp_path / "tm.sqlite")
+    cfg.raw["tm"]["tmx_export"] = str(tmp_path / "tm.tmx")
+    return cfg
+
+
+def test_import_review_xliff_updates_tm(tmp_path: Path):
+    from qc_translate.review import import_review
+    from qc_translate.tm import TranslationMemory
+    job = tmp_path / "job"; job.mkdir()
+    (job / "source.docx.xlf").write_text(MINI_XLIFF, encoding="utf-8")
+    reviewed = tmp_path / "reviewed.xlf"
+    reviewed.write_text(MINI_XLIFF.replace(
+        "<trans-unit id=\"1\"><source>Click <g id=\"1\">Save</g> now.</source></trans-unit>",
+        "<trans-unit id=\"1\"><source>Click <g id=\"1\">Save</g> now.</source>"
+        "<target>Cliquez sur <g id=\"1\">Enregistrer</g> maintenant.</target></trans-unit>"),
+        encoding="utf-8")
+    cfg = _tmp_cfg(tmp_path)
+    updated, total = import_review(cfg, reviewed, job)
+    assert updated == 1
+    tm = TranslationMemory(cfg.tm["db"])
+    assert "Enregistrer" in (tm.exact("Click Save now.") or "")
+    tm.close()
+
+
+def test_package_builds_zip(tmp_path: Path):
+    import zipfile
+    from docx import Document
+    from qc_translate.review import package
+    job = tmp_path / "job"; job.mkdir()
+    Document().save(str(job / "sample.fr-CA.draft.docx"))
+    (job / "qa_report.html").write_text("<html>qa</html>")
+    cfg = _tmp_cfg(tmp_path)
+    zip_path, files = package(cfg, job)
+    names = zipfile.ZipFile(zip_path).namelist()
+    assert "REVIEW_INSTRUCTIONS.md" in names
+    assert "sample.fr-CA.draft.docx" in names and "qa_report.html" in names
+
+
 def test_finalize_docx_sets_language_and_fields(tmp_path: Path):
     import zipfile
     from docx import Document

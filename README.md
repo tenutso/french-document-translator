@@ -52,6 +52,37 @@ manual `export`. For local/manual use instead, `cp .env.example .env` and fill i
 
 Verify a token is visible: `source scripts/runpod_env.sh && echo "${HF_TOKEN:0:4}…"`.
 
+## Reviewer workflow & future updates
+
+Treat the pod as a batch engine; the reviewer works off it. The **translation memory (TM)**
+is the compounding asset — reviewer corrections and unchanged segments are reused on the next
+document, so quality rises and re-work falls over time.
+
+```bash
+# 1. Package the reviewer's files (French .docx + reports + instructions) and refresh the TMX
+qc-translate package /workspace/jobs/manual
+runpodctl send /workspace/jobs/manual/manual_review_package.zip   # pull it off the pod
+
+# 2. Reviewer edits the French .docx in Word (Track Changes) and sends it back.
+
+# 3. Fold their corrections back into the TM (so future docs reuse the approved wording)
+qc-translate import-review reviewed.docx --job /workspace/jobs/manual
+```
+
+- **`package`** zips `*.fr-CA.draft.docx` + `qa_report.html` + `image_report.html` +
+  `translated.xlf` + `REVIEW_INSTRUCTIONS.md`, and refreshes `qc_translate.tmx`.
+- **`import-review`** accepts the reviewed **`.docx`** (aligned by exact/fuzzy match to the
+  machine French — robust to segmentation drift) or a reviewed **`.xlf`** (id-based, exact —
+  the OmegaT/CAT route). Only changed segments update the TM.
+- **New source version (v7, v8…):** just `qc-translate run new.docx` — the TM reuses every
+  unchanged segment and only translates what changed.
+- **Durability:** the TM lives on the `/workspace` volume. Keep the exported `qc_translate.tmx`
+  (from `package`/`export-tm`) with your client data so the memory survives if the volume is
+  ever deleted.
+
+**OmegaT alternative:** open `omegat_project/` for segment-level review with the glossary + TM;
+run `merge` for the final `.docx`, then `import-review reviewed.xlf` to update the TM.
+
 ## Configuration
 
 Everything GPU/model/path-specific lives in [`config/pipeline.yaml`](config/pipeline.yaml).

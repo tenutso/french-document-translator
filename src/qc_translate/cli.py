@@ -171,6 +171,36 @@ def qa(
     console.print(f"[green]QA report →[/] {out}  ({flagged}/{len(segments)} flagged)")
 
 
+@app.command()
+def package(
+    job_dir: Path = typer.Argument(..., exists=True),
+    out: Path = typer.Option(None, "--out", "-o", help="Output .zip (default: <job>_review_package.zip)"),
+    config: Path = typer.Option(None, "--config", "-c"),
+):
+    """Zip the reviewer's files (French .docx + reports + instructions) and refresh the TMX."""
+    from . import review
+    cfg = load_config(config)
+    zip_path, files = review.package(cfg, job_dir, out)
+    console.print(f"[green]Review package →[/] {zip_path}")
+    for f in files:
+        console.print(f"    included: {f.name}")
+    console.print("\nPull it off the pod, e.g.:  [bold]runpodctl send " + str(zip_path) + "[/]")
+
+
+@app.command("import-review")
+def import_review_cmd(
+    reviewed: Path = typer.Argument(..., exists=True, help="Reviewed .docx or .xlf"),
+    job_dir: Path = typer.Option(..., "--job", help="Original job dir (has source.docx.xlf)"),
+    config: Path = typer.Option(None, "--config", "-c"),
+):
+    """Fold a reviewer's corrections back into the translation memory (compounds over time)."""
+    from . import review
+    cfg = load_config(config)
+    updated, total = review.import_review(cfg, reviewed, job_dir)
+    console.print(f"[green]TM updated[/] from {updated}/{total} reviewed segments "
+                  f"→ {cfg.tm['db']}")
+
+
 @app.command("export-tm")
 def export_tm(config: Path = typer.Option(None, "--config", "-c")):
     """Export the translation memory to TMX."""

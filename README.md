@@ -40,6 +40,20 @@ re-spinning a pod is fast and reuses cached weights. No Docker.
 Everything GPU/model/path-specific lives in [`config/pipeline.yaml`](config/pipeline.yaml).
 Switch `llm.profile` between `l4` (Tower+ 9B) and `a100` (Tower+ 72B) with one line.
 
+### L4 note (important)
+On a 23GB L4, Tower+ 9B in **bf16** leaves only ~0.7GB for KV cache, which starves
+concurrent requests and corrupts short segments. The `l4` profile therefore uses **FP8**
+(Ada-native), which frees ~8GB of KV cache and enables the full 8192 context with stable
+concurrency — with negligible quality loss for translation. Prefer a bigger GPU (A100/H100)
+for the 72B model when top quality matters.
+
+## Verified
+
+On an L4 (Tower+ 9B, FP8) the fixture manual round-trips end to end: quality Quebec French
+with glossary applied, formatting (headings, numbered list, table, footer, image) intact,
+clean Okapi merge, and QA/image reports generated. `pytest` covers the pure-Python logic
+(masking, glossary, QA, TM, XLIFF I/O, image location, reports).
+
 ## Licensing & attribution
 
 Code in this repo: MIT. This pipeline is intended for **non-commercial** use and relies on

@@ -77,16 +77,6 @@ qe:
     enabled: false                            # optional second signal on low-QE segments
     model: facebook/nllb-200-distilled-1.3B
 
-# --- Bilingual assembly (sequential blocks, per CAPS guidelines) ---------------
-bilingual:
-  default_order: en-fr                        # en-fr (English first) or fr-en
-  # Bilingual notice placed at the very top (CAPS required header).
-  notice_en_first: "(La version française suit la version anglaise)"
-  notice_fr_first: "(English version follows below)"
-  # Divider shown on a new page before the second-language block.
-  divider_fr: "———  Version française  ———"
-  divider_en: "———  English version  ———"
-
 # --- Images --------------------------------------------------------------------
 images:
   ocr_langs: eng                              # OCR the *source* (English) text

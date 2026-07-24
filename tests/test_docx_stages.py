@@ -88,33 +88,6 @@ def test_finalize_docx_sets_language_and_fields(tmp_path: Path):
     assert Document(str(p)).paragraphs[0].text == "Bonjour le monde."
 
 
-def test_bilingual_combine(tmp_path: Path):
-    from docx import Document
-    from qc_translate.bilingual import combine
-
-    en = tmp_path / "en.docx"
-    d = Document(); d.add_heading("English Title", 0); d.add_paragraph("Hello world.")
-    d.save(str(en))
-    fr = tmp_path / "fr.docx"
-    d = Document(); d.add_heading("Titre français", 0); d.add_paragraph("Bonjour le monde.")
-    d.save(str(fr))
-
-    out = combine(CFG, en, fr, tmp_path / "bi.docx", order="en-fr")
-    combined = Document(str(out))
-    texts = [p.text for p in combined.paragraphs]
-    joined = "\n".join(texts)
-    # English content precedes French content, with the CAPS notice + divider present.
-    assert "Hello world." in joined and "Bonjour le monde." in joined
-    assert joined.index("Hello world.") < joined.index("Bonjour le monde.")
-    assert any("version française suit" in t for t in texts)   # top notice (en-first)
-    assert any("Version française" in t for t in texts)        # divider
-
-    # fr-en order flips the sequence.
-    out2 = combine(CFG, en, fr, tmp_path / "bi2.docx", order="fr-en")
-    j2 = "\n".join(p.text for p in Document(str(out2)).paragraphs)
-    assert j2.index("Bonjour le monde.") < j2.index("Hello world.")
-
-
 def test_reports_render(tmp_path: Path):
     segs = [
         Segment("1", "Send the email.", "Envoyez le courriel.", qe_score=0.91),

@@ -52,20 +52,6 @@ manual `export`. For local/manual use instead, `cp .env.example .env` and fill i
 
 Verify a token is visible: `source scripts/runpod_env.sh && echo "${HF_TOKEN:0:4}…"`.
 
-## Bilingual output (optional)
-
-Assemble a single bilingual DOCX as **sequential blocks** (per the CAPS guideline: English
-first, a page-break divider, then French — never interleaved), preserving all formatting of
-both via docxcompose:
-
-```bash
-qc-translate bilingual /workspace/jobs/manual            # -> <job>/bilingual.docx (en-fr)
-qc-translate bilingual /workspace/jobs/manual --order fr-en   # French first (Quebec materials)
-```
-
-It combines the job's `source.docx` (English) and `*.fr-CA.draft.docx` (French); override with
-`--en` / `--fr`. Notice and divider text are configured under `bilingual:` in `pipeline.yaml`.
-
 ## Configuration
 
 Everything GPU/model/path-specific lives in [`config/pipeline.yaml`](config/pipeline.yaml).

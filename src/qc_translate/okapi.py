@@ -141,7 +141,7 @@ def finalize_docx(docx_path: str | Path, target_lang: str | None = None,
 
     - update_fields: <w:updateFields> so Word rebuilds the TOC/page numbers on open.
     - target_lang: set <w:lang w:val="..."> on every run/style/default (and themeFontLang)
-      so Word spell-checks in French, not English. Skip target_lang for bilingual output.
+      so Word spell-checks in French, not English.
     """
     docx_path = Path(docx_path)
     with zipfile.ZipFile(docx_path) as zin:
@@ -172,8 +172,8 @@ def finalize_docx(docx_path: str | Path, target_lang: str | None = None,
             if name == "word/styles.xml":
                 _ensure_docdefaults_lang(root, target_lang)
             else:
-                # Set an EXPLICIT lang on every run so the language survives concatenation
-                # (docxcompose adopts the master's docDefaults; inherited langs would be lost).
+                # Set an EXPLICIT lang on every run (not just docDefaults) so proofing is
+                # unambiguous regardless of style inheritance.
                 _set_run_langs(root, target_lang)
             data[name] = _serialize(root)
 

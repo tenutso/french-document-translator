@@ -171,34 +171,6 @@ def qa(
     console.print(f"[green]QA report →[/] {out}  ({flagged}/{len(segments)} flagged)")
 
 
-@app.command()
-def bilingual(
-    job_dir: Path = typer.Argument(..., exists=True,
-                                   help="Job dir with source.docx + the *.fr-CA.draft.docx"),
-    out_docx: Path = typer.Option(None, "--out", "-o", help="Output .docx (default: <job>/bilingual.docx)"),
-    order: str = typer.Option(None, "--order", help="en-fr (default) or fr-en (Quebec materials)"),
-    en_docx: Path = typer.Option(None, "--en", help="Override the English source .docx"),
-    fr_docx: Path = typer.Option(None, "--fr", help="Override the French translated .docx"),
-    config: Path = typer.Option(None, "--config", "-c"),
-):
-    """Assemble a bilingual DOCX: full English, divider, full French (formatting preserved)."""
-    from . import bilingual as bil
-    cfg = load_config(config)
-
-    en = en_docx or (job_dir / "source.docx")
-    if fr_docx is None:
-        fr_candidates = sorted(job_dir.glob("*.fr-CA.draft.docx"))
-        if not fr_candidates:
-            raise typer.BadParameter(f"No *.fr-CA.draft.docx in {job_dir}; pass --fr")
-        fr_docx = fr_candidates[0]
-    if not Path(en).exists():
-        raise typer.BadParameter(f"English source not found: {en}; pass --en")
-
-    out = out_docx or (job_dir / "bilingual.docx")
-    result = bil.combine(cfg, en, fr_docx, out, order=order)
-    console.print(f"[green]Bilingual DOCX →[/] {result}  (order: {order or 'default'})")
-
-
 @app.command("export-tm")
 def export_tm(config: Path = typer.Option(None, "--config", "-c")):
     """Export the translation memory to TMX."""

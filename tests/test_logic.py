@@ -46,6 +46,21 @@ def test_mask_unescapes_entities_for_model():
     assert unmask_inline("Tom & Jerry <note>", codes) == "Tom &amp; Jerry &lt;note&gt;"
 
 
+def test_codes_mergeable_allows_reorder_rejects_bad():
+    from qc_translate.xliff import codes_mergeable
+    src = ('<bpt id="1">a</bpt>One<ept id="1">b</ept> '
+           '<bpt id="2">c</bpt>Two<ept id="2">d</ept>')
+    # Two bold spans swapped in the translation — same codes, still well-formed.
+    reordered = ('<bpt id="2">c</bpt>Deux<ept id="2">d</ept> '
+                 '<bpt id="1">a</bpt>Un<ept id="1">b</ept>')
+    assert codes_mergeable(src, reordered)
+    # Missing a code -> not mergeable.
+    assert not codes_mergeable(src, '<bpt id="1">a</bpt>Un<ept id="1">b</ept>')
+    # ept before its bpt (bad nesting) -> not mergeable.
+    assert not codes_mergeable('<bpt id="1">a</bpt>X<ept id="1">b</ept>',
+                               '<ept id="1">b</ept>X<bpt id="1">a</bpt>')
+
+
 def test_mask_native_codes_hidden_whole():
     # Okapi native codes carry escaped Word markup as content; it must be hidden whole
     # so the model never sees "<run1>" and plaintext isn't polluted.

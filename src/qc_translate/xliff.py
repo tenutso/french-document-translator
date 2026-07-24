@@ -100,6 +100,30 @@ def codes_match(a_xml: str, b_xml: str) -> bool:
     return inline_code_ids(a_xml) == inline_code_ids(b_xml)
 
 
+def codes_mergeable(src_xml: str, tgt_xml: str) -> bool:
+    """True if the target's inline codes will merge cleanly, allowing reordering.
+
+    Okapi matches codes by id, so a valid translation may reorder inline spans (e.g. two
+    bold phrases swap). We require: (1) the same multiset of codes as the source, and
+    (2) well-formed pairing — each bpt#k precedes its ept#k. This is stricter than merge
+    actually needs but safe, and far less trigger-happy than exact-order codes_match.
+    """
+    from collections import Counter
+    src_ids = inline_code_ids(src_xml)
+    tgt_ids = inline_code_ids(tgt_xml)
+    if Counter(src_ids) != Counter(tgt_ids):
+        return False
+    first: dict[str, int] = {}
+    for i, tok in enumerate(tgt_ids):
+        first.setdefault(tok, i)
+    for tok in tgt_ids:
+        if tok.startswith("bpt#"):
+            ept = "ept#" + tok.split("#", 1)[1]
+            if ept in first and first[tok] > first[ept]:
+                return False
+    return True
+
+
 def inline_code_ids(xml: str) -> list[str]:
     """Ordered list of inline-code identity tokens in a source/target string.
 

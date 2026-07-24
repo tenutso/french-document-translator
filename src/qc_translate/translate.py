@@ -14,7 +14,7 @@ import httpx
 from .config import Config
 from .models import Segment
 from .tm import TranslationMemory, plain
-from .xliff import codes_match, mask_inline, unmask_inline, visible_text
+from .xliff import codes_mergeable, mask_inline, unmask_inline, visible_text
 
 
 _MINIMAL_SYSTEM = ("Translate the text from English into {tgt} (Quebec French). "
@@ -194,7 +194,7 @@ class VLLMClient:
                 seg.qa_flags.append("codes_repaired")
 
             target = unmask_inline(cased, codes)
-            if not codes_match(seg.source_xml, target):
+            if not codes_mergeable(seg.source_xml, target):
                 seg.target_xml = seg.source_xml   # last resort: valid merge over French-ish
                 seg.qa_flags.append("tag_mismatch")
                 return

@@ -11,7 +11,7 @@ from collections import Counter
 from .config import Config
 from .models import Segment
 from .tm import plain
-from .xliff import inline_code_ids
+from .xliff import codes_mergeable
 
 _NUM = re.compile(r"\d[\d.,\s]*")
 
@@ -32,7 +32,7 @@ def check_segment(seg: Segment, cfg: Config) -> None:
         seg.qa_flags.append("untranslated")
 
     # 2. Inline formatting codes must match exactly (order + multiplicity).
-    if inline_code_ids(src) != inline_code_ids(tgt):
+    if not codes_mergeable(src, tgt):
         seg.qa_flags.append("tag_mismatch")
 
     # 3. Numbers preserved.

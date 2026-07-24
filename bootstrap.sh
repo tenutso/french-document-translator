@@ -26,17 +26,28 @@ log() { printf '\033[1;34m[bootstrap]\033[0m %s\n' "$*"; }
 
 # ---- 1. Python venv + deps ---------------------------------------------------
 if [[ ! -x "$VENV/bin/python" ]]; then
-  log "Creating venv at $VENV"
-  python3 -m venv "$VENV"
+  # --system-site-packages so the venv REUSES the pod image's torch/CUDA stack
+  # (e.g. torch 2.8+cu128) instead of pip pulling a second, conflicting copy.
+  log "Creating venv (system-site-packages) at $VENV"
+  python3 -m venv --system-site-packages "$VENV"
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
-python -m pip install --quiet --upgrade pip
+python -m pip install --upgrade pip
+
+# Pin the already-installed torch so vLLM's resolver treats it as satisfied and never
+# tries to reinstall/downgrade it.
+TORCH_VER="$(python -c 'import torch; print(torch.__version__.split("+")[0])' 2>/dev/null || true)"
+CONSTRAINTS="$WORKSPACE/pip-constraints.txt"
+: > "$CONSTRAINTS"
+[[ -n "$TORCH_VER" ]] && echo "torch==$TORCH_VER" >> "$CONSTRAINTS" && log "Pinning torch==$TORCH_VER for vLLM"
+
 log "Installing project (base deps)"
-pip install --quiet -e "$REPO_DIR"
-# GPU/QE extras (vLLM, COMET, transformers). Torch already ships in the pod image.
+pip install -e "$REPO_DIR"
+# GPU/QE extras (vLLM, COMET, transformers). Torch reused from the pod image.
 log "Installing serve + qe extras (vLLM, COMET, transformers)"
-pip install --quiet -e "$REPO_DIR[serve,qe]" || log "WARN: serve/qe extras failed; check CUDA/torch compatibility"
+PIP_CONSTRAINT="$CONSTRAINTS" pip install -e "$REPO_DIR[serve,qe]" \
+  || log "WARN: serve/qe extras failed; check vLLM<->torch $TORCH_VER compatibility"
 
 # ---- 2. Java (portable Temurin JRE, unless a system java exists) -------------
 JDK_DIR="$TOOLS/jdk"

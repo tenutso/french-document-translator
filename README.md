@@ -58,19 +58,22 @@ A small self-serve UI to upload a source `.docx`, watch status + log, and downlo
 package — no command line needed.
 
 ```bash
-bash serve.sh start     # translation engine (vLLM) must be running
-bash webui.sh           # UI on :8080 (QC_UI_PORT to change)
+bash webui.sh           # UI on 0.0.0.0:7860 (QC_UI_PORT to change)
 ```
 
-Open it over an **SSH tunnel** (it has no built-in auth and handles client documents):
+Access it through **RunPod's built-in HTTP proxy** (expose port 7860 on the pod):
 
-```bash
-ssh -L 8080:localhost:8080 <pod>     # then browse http://localhost:8080
+```
+https://<POD_ID>-7860.proxy.runpod.net
 ```
 
-The UI runs each job as a detached pipeline (translate → package) and shows an engine
-online/offline badge. It runs with `--skip-qe` (CometKiwi needs the GPU that vLLM holds); run
-`qc-translate qa <job>` separately for quality scores when the engine is stopped.
+The engine **auto-starts on the first upload** (no need to run `serve.sh` first). Each job runs
+as a detached translate → package pipeline and the page shows an engine online/offline badge.
+Jobs run with `--skip-qe` (CometKiwi needs the GPU that vLLM holds); run `qc-translate qa <job>`
+separately for quality scores when the engine is stopped.
+
+The proxy URL has no login and this handles client documents — treat the URL as sensitive, or
+put your own auth in front. (Prefer an SSH tunnel? `ssh -L 7860:localhost:7860 <pod>`.)
 
 ## Reviewer workflow & future updates
 

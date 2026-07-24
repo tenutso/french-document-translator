@@ -8,9 +8,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 
+from lxml import etree
+
 from .config import Config
+
+_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _tikal(cfg: Config) -> Path:
@@ -93,7 +98,41 @@ def merge(cfg: Config, xliff_path: str | Path,
     out = Path(out_docx)
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(produced), str(out))
+    enable_update_fields(out)
     return out
+
+
+def enable_update_fields(docx_path: str | Path) -> None:
+    """Set <w:updateFields w:val="true"/> in settings.xml.
+
+    Word TOCs and page-number fields cache their text; this makes Word regenerate all
+    fields on open, so the TOC rebuilds from the translated headings (French).
+    """
+    docx_path = Path(docx_path)
+    with zipfile.ZipFile(docx_path) as zin:
+        names = zin.namelist()
+        settings_name = "word/settings.xml"
+        if settings_name in names:
+            root = etree.fromstring(zin.read(settings_name))
+        else:
+            root = etree.fromstring(
+                f'<w:settings xmlns:w="{_W}"/>'.encode())
+        # Remove any existing updateFields, then insert at the top of <w:settings>.
+        for el in root.findall(f"{{{_W}}}updateFields"):
+            root.remove(el)
+        upd = etree.SubElement(root, f"{{{_W}}}updateFields")
+        upd.set(f"{{{_W}}}val", "true")
+        root.insert(0, upd)
+        new_settings = etree.tostring(root, xml_declaration=True,
+                                      encoding="UTF-8", standalone=True)
+        data = {n: zin.read(n) for n in names}
+    data[settings_name] = new_settings
+    # settings.xml must be registered in [Content_Types].xml (it is in any real docx).
+    tmp = docx_path.with_suffix(".tmp.docx")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n, d in data.items():
+            zout.writestr(n, d)
+    tmp.replace(docx_path)
 
 
 def _find_original(work: Path) -> Path:

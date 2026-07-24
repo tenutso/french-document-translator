@@ -42,18 +42,32 @@ def _escape_text(t: str) -> str:
 
 _ANY_TAG = re.compile(r"<[^>]+>")
 _PLACEHOLDER = re.compile(r"⟦\s*(\d+)\s*⟧")
+# Okapi "native" inline codes carry the original Word markup as their (escaped) content,
+# e.g. <ph id="1">&lt;tags1/&gt;</ph> or <bpt id="1">&lt;run1&gt;</bpt>. That content is
+# NOT translatable and must be hidden whole — leaking it (as <tags1/>, <run1>) confuses
+# the model (dropped placeholders -> reverts) and pollutes plaintext (breaks case detection).
+# <g>/<mrk> are excluded: their content IS translatable, so only their tags are masked.
+_NATIVE_PAIRED = re.compile(r"<(bpt|ept|ph|it|sub)\b[^>]*>.*?</\1\s*>", re.DOTALL)
 
 
 def _unescape_text(t: str) -> str:
     return t.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 
 
+def visible_text(source_xml: str) -> str:
+    """Human-visible text of a segment: inline codes (and their native content) removed."""
+    masked, _ = mask_inline(source_xml)
+    return re.sub(r"\s+", " ", _PLACEHOLDER.sub("", masked)).strip()
+
+
 def mask_inline(source_xml: str) -> tuple[str, list[str]]:
     """Replace inline codes with opaque ⟦N⟧ placeholders for the LLM.
 
     Returns (masked_text, codes) where masked_text is natural (un-escaped) text with
-    numbered placeholders, and codes[i] is the original tag string for ⟦i+1⟧. Asking the
-    model to keep simple placeholders is far more reliable than asking it to emit XML.
+    numbered placeholders, and codes[i] is the original code string for ⟦i+1⟧. Native
+    paired codes are masked whole (tag + escaped content + close) so the model never sees
+    the raw Word markup; remaining standalone tags (<g>, </g>, <x/>, <mrk> ...) are masked
+    individually, keeping any translatable text between them.
     """
     codes: list[str] = []
 
@@ -61,7 +75,8 @@ def mask_inline(source_xml: str) -> tuple[str, list[str]]:
         codes.append(m.group(0))
         return f"⟦{len(codes)}⟧"
 
-    masked = _ANY_TAG.sub(repl, source_xml)
+    masked = _NATIVE_PAIRED.sub(repl, source_xml)  # whole native codes first
+    masked = _ANY_TAG.sub(repl, masked)            # then any remaining tags
     return _unescape_text(masked), codes
 
 

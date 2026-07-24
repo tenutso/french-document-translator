@@ -6,6 +6,7 @@ with the Quebec-FR system prompt, glossary constraints, and any fuzzy TM referen
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 import httpx
@@ -13,7 +14,7 @@ import httpx
 from .config import Config
 from .models import Segment
 from .tm import TranslationMemory, plain
-from .xliff import mask_inline, unmask_inline
+from .xliff import codes_match, mask_inline, unmask_inline, visible_text
 
 
 _MINIMAL_SYSTEM = ("Translate the text from English into {tgt} (Quebec French). "
@@ -28,6 +29,29 @@ def _degenerate(src_plain: str, tgt_plain: str) -> bool:
     if not tgt_plain:
         return True
     return len(src_plain) <= 40 and len(tgt_plain) > 3 * len(src_plain) + 40
+
+
+_PH_NUM = re.compile(r"⟦\s*(\d+)\s*⟧")
+_OPENING = re.compile(r"<(bpt|g|bx)\b")
+
+
+def _placeholders_present(text: str) -> set[int]:
+    return {int(x) for x in _PH_NUM.findall(text)}
+
+
+def _repair_placeholders(content: str, codes: list[str]) -> str:
+    """Re-insert any placeholders the model dropped so the code set matches the source.
+
+    Openings (bpt/g/bx) are prepended, closings/standalone appended. This keeps the
+    translation (French) mergeable instead of reverting the whole segment to English;
+    formatting may wrap slightly differently, which QA flags as codes_repaired.
+    """
+    present = _placeholders_present(content)
+    for i, code in enumerate(codes, 1):
+        if i in present:
+            continue
+        content = f"⟦{i}⟧" + content if _OPENING.match(code) else content + f"⟦{i}⟧"
+    return content
 
 
 def _is_allcaps(text: str) -> bool:
@@ -109,15 +133,27 @@ class VLLMClient:
 
     async def _one(self, client: httpx.AsyncClient, seg: Segment, system: str) -> None:
         masked_source, codes = mask_inline(seg.source_xml)
-        src_plain = plain(seg.source_xml)
+        # Case detection uses the human-visible text (codes + their native content removed),
+        # so escaped code content like "&lt;tags1/&gt;" can't skew the uppercase ratio.
+        visible = visible_text(seg.source_xml)
+        src_plain = visible
         temp = self.llm.get("temperature", 0.1)
         # ALL-CAPS input makes Tower+ hallucinate; translate in lower case and restore
         # the uppercase after (placeholders are digits, unaffected by .upper()).
-        allcaps = _is_allcaps(src_plain)
+        allcaps = _is_allcaps(visible)
         send_source = masked_source.lower() if allcaps else masked_source
 
-        def finalize(content: str) -> str:
-            return unmask_inline(content.upper() if allcaps else content, codes)
+        n = len(codes)
+        want = set(range(1, n + 1))
+
+        def casify(content: str) -> str:
+            return content.upper() if allcaps else content
+
+        def is_good(content: str) -> bool:
+            """Placeholders all present AND not a degenerate (prompt-echo) output."""
+            if _placeholders_present(content) != want:
+                return False
+            return not _degenerate(src_plain, plain(unmask_inline(casify(content), codes)))
 
         async with self.sem:
             # Primary attempt with the full (brand/style) prompt.
@@ -129,22 +165,39 @@ class VLLMClient:
                 seg.target_xml = seg.source_xml
                 seg.qa_flags.append("translation_failed")
                 return
-            target = finalize(content)
 
-            # Guard: translation-specialized models sometimes echo/translate the long
-            # system prompt on short, ambiguous segments. Detect that and retry with a
-            # minimal prompt; if it still misbehaves, keep the source (flagged).
-            if _degenerate(src_plain, plain(target)):
-                content = await self._request(client, [
+            # If placeholders were dropped or the model echoed the prompt, retry once with
+            # a minimal prompt (translation models misbehave less without the long system).
+            if not is_good(content):
+                retry = await self._request(client, [
                     {"role": "system", "content": _MINIMAL_SYSTEM.format(
                         tgt=self.cfg.language["target"])},
                     {"role": "user", "content": send_source},
                 ], 0.0)
-                target = finalize(content) if content else seg.source_xml
-                if content is None or _degenerate(src_plain, plain(target)):
-                    seg.target_xml = seg.source_xml
-                    seg.qa_flags.append("degenerate_output")
-                    return
+                if retry is not None and (
+                    is_good(retry)
+                    # or retry at least preserves all placeholders and the primary didn't
+                    or (_placeholders_present(retry) == want
+                        and _placeholders_present(content) != want)
+                ):
+                    content = retry
+
+            cased = casify(content)
+            # Degenerate even after retry -> keep source (flagged); merge stays valid.
+            if _degenerate(src_plain, plain(unmask_inline(cased, codes))):
+                seg.target_xml = seg.source_xml
+                seg.qa_flags.append("degenerate_output")
+                return
+            # Repair any still-missing placeholders so the segment stays French & mergeable.
+            if _placeholders_present(cased) != want:
+                cased = _repair_placeholders(cased, codes)
+                seg.qa_flags.append("codes_repaired")
+
+            target = unmask_inline(cased, codes)
+            if not codes_match(seg.source_xml, target):
+                seg.target_xml = seg.source_xml   # last resort: valid merge over French-ish
+                seg.qa_flags.append("tag_mismatch")
+                return
             seg.target_xml = target
 
     async def _run(self, segments: list[Segment], system: str) -> None:

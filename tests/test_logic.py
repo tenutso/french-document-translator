@@ -8,7 +8,7 @@ from qc_translate.qa import check_segment
 from qc_translate.segment_glossary import Glossary
 from qc_translate.tm import TranslationMemory, plain
 from qc_translate.xliff import (codes_match, inline_code_ids, mask_inline,
-                                unmask_inline)
+                                unmask_inline, visible_text)
 
 CFG = load_config()
 
@@ -44,6 +44,28 @@ def test_mask_unescapes_entities_for_model():
     masked, codes = mask_inline(src)
     assert masked == "Tom & Jerry <note>"  # model sees natural text
     assert unmask_inline("Tom & Jerry <note>", codes) == "Tom &amp; Jerry &lt;note&gt;"
+
+
+def test_mask_native_codes_hidden_whole():
+    # Okapi native codes carry escaped Word markup as content; it must be hidden whole
+    # so the model never sees "<run1>" and plaintext isn't polluted.
+    src = ('At the <bpt id="1">&lt;run1&gt;</bpt>Business Starter Track'
+           '<ept id="1">&lt;/run1&gt;</ept> today.')
+    masked, codes = mask_inline(src)
+    assert "run1" not in masked                       # native content hidden
+    assert masked == "At the ⟦1⟧Business Starter Track⟦2⟧ today."
+    model_out = "Au ⟦1⟧Parcours « Démarrage d'entreprise »⟦2⟧ aujourd'hui."
+    restored = unmask_inline(model_out, codes)
+    assert codes_match(src, restored)
+    assert "&lt;run1&gt;" in restored                 # native code restored verbatim
+
+
+def test_visible_text_ignores_native_code_content():
+    # The casing bug: <ph> native content dragged the uppercase ratio below the threshold.
+    from qc_translate.translate import _is_allcaps
+    src = 'The CAPS ACADEMY<ph id="1">&lt;tags1/&gt;</ph>'
+    assert visible_text(src) == "The CAPS ACADEMY"
+    assert _is_allcaps(visible_text(src)) is True      # now correctly detected as caps
 
 
 def test_unmask_tolerates_spacing_and_flags_missing():
@@ -146,6 +168,18 @@ def test_degenerate_guard():
     assert not _degenerate("Result", "Résultat")
     assert not _degenerate("Download the file", "Téléchargez le fichier")
     assert not _degenerate("A" * 200, "B" * 260)  # long source, proportional target
+
+
+def test_repair_placeholders():
+    from qc_translate.translate import _repair_placeholders, _placeholders_present
+    codes = ['<bpt id="1">&lt;run1&gt;</bpt>', '<ept id="1">&lt;/run1&gt;</ept>']
+    # Model dropped the opening ⟦1⟧; repair prepends it (openings go to the front).
+    fixed = _repair_placeholders("Membre professionnel certifié⟦2⟧ – suite", codes)
+    assert _placeholders_present(fixed) == {1, 2}
+    assert fixed.startswith("⟦1⟧")
+    # Dropped a trailing standalone code -> appended.
+    fixed2 = _repair_placeholders("Texte ⟦1⟧ ici", ['<x id="1"/>', '<ph id="2">a</ph>'])
+    assert _placeholders_present(fixed2) == {1, 2} and fixed2.endswith("⟦2⟧")
 
 
 def test_is_allcaps():

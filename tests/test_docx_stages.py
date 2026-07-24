@@ -67,6 +67,27 @@ def test_image_location_resolution():
     assert im.thumbnail_data_uri.startswith("data:image/png;base64,")
 
 
+def test_finalize_docx_sets_language_and_fields(tmp_path: Path):
+    import zipfile
+    from docx import Document
+    from qc_translate.okapi import finalize_docx
+
+    p = tmp_path / "d.docx"
+    d = Document(); d.add_paragraph("Bonjour le monde."); d.save(str(p))
+    finalize_docx(p, target_lang="fr-CA")
+
+    z = zipfile.ZipFile(p)
+    settings = z.read("word/settings.xml").decode()
+    styles = z.read("word/styles.xml").decode()
+    document = z.read("word/document.xml").decode()
+    assert "updateFields" in settings and 'w:val="true"' in settings
+    assert "fr-CA" in settings          # themeFontLang
+    assert "fr-CA" in styles            # docDefaults lang -> French proofing
+    assert 'w:val="fr-CA"' in document  # explicit per-run lang (survives concatenation)
+    # still a valid, readable docx
+    assert Document(str(p)).paragraphs[0].text == "Bonjour le monde."
+
+
 def test_bilingual_combine(tmp_path: Path):
     from docx import Document
     from qc_translate.bilingual import combine

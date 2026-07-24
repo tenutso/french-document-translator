@@ -6,6 +6,7 @@ it to $OKAPI_HOME and puts JAVA on PATH; .env.runtime exports both.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import zipfile
@@ -16,6 +17,7 @@ from lxml import etree
 from .config import Config
 
 _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_LANG_PARTS = re.compile(r"word/(document|styles|header\d*|footer\d*|footnotes|endnotes)\.xml$")
 
 
 def _tikal(cfg: Config) -> Path:
@@ -98,36 +100,83 @@ def merge(cfg: Config, xliff_path: str | Path,
     out = Path(out_docx)
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(produced), str(out))
-    enable_update_fields(out)
+    finalize_docx(out, target_lang=cfg.language["target"])
     return out
 
 
-def enable_update_fields(docx_path: str | Path) -> None:
-    """Set <w:updateFields w:val="true"/> in settings.xml.
+def _serialize(root) -> bytes:
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
-    Word TOCs and page-number fields cache their text; this makes Word regenerate all
-    fields on open, so the TOC rebuilds from the translated headings (French).
+
+def _ensure_docdefaults_lang(styles_root, lang: str) -> None:
+    """Set the default run language in styles.xml docDefaults (covers runs with no explicit lang)."""
+    def child(parent, tag):
+        el = parent.find(f"{{{_W}}}{tag}")
+        if el is None:
+            el = etree.SubElement(parent, f"{{{_W}}}{tag}")
+        return el
+    rpr = child(child(child(styles_root, "docDefaults"), "rPrDefault"), "rPr")
+    lang_el = rpr.find(f"{{{_W}}}lang")
+    if lang_el is None:
+        lang_el = etree.SubElement(rpr, f"{{{_W}}}lang")
+    lang_el.set(f"{{{_W}}}val", lang)
+
+
+def _set_run_langs(root, lang: str) -> None:
+    """Ensure every run has an explicit <w:lang w:val=lang> in its rPr."""
+    for r in root.iter(f"{{{_W}}}r"):
+        rpr = r.find(f"{{{_W}}}rPr")
+        if rpr is None:
+            rpr = etree.Element(f"{{{_W}}}rPr")
+            r.insert(0, rpr)          # rPr must be the first child of a run
+        lang_el = rpr.find(f"{{{_W}}}lang")
+        if lang_el is None:
+            lang_el = etree.SubElement(rpr, f"{{{_W}}}lang")
+        lang_el.set(f"{{{_W}}}val", lang)
+
+
+def finalize_docx(docx_path: str | Path, target_lang: str | None = None,
+                  update_fields: bool = True) -> None:
+    """Post-process a merged DOCX in place: refresh fields and set proofing language.
+
+    - update_fields: <w:updateFields> so Word rebuilds the TOC/page numbers on open.
+    - target_lang: set <w:lang w:val="..."> on every run/style/default (and themeFontLang)
+      so Word spell-checks in French, not English. Skip target_lang for bilingual output.
     """
     docx_path = Path(docx_path)
     with zipfile.ZipFile(docx_path) as zin:
-        names = zin.namelist()
-        settings_name = "word/settings.xml"
-        if settings_name in names:
-            root = etree.fromstring(zin.read(settings_name))
-        else:
-            root = etree.fromstring(
-                f'<w:settings xmlns:w="{_W}"/>'.encode())
-        # Remove any existing updateFields, then insert at the top of <w:settings>.
-        for el in root.findall(f"{{{_W}}}updateFields"):
-            root.remove(el)
-        upd = etree.SubElement(root, f"{{{_W}}}updateFields")
+        data = {n: zin.read(n) for n in zin.namelist()}
+
+    settings = data.get("word/settings.xml") or f'<w:settings xmlns:w="{_W}"/>'.encode()
+    sroot = etree.fromstring(settings)
+    if update_fields:
+        for el in sroot.findall(f"{{{_W}}}updateFields"):
+            sroot.remove(el)
+        upd = etree.Element(f"{{{_W}}}updateFields")
         upd.set(f"{{{_W}}}val", "true")
-        root.insert(0, upd)
-        new_settings = etree.tostring(root, xml_declaration=True,
-                                      encoding="UTF-8", standalone=True)
-        data = {n: zin.read(n) for n in names}
-    data[settings_name] = new_settings
-    # settings.xml must be registered in [Content_Types].xml (it is in any real docx).
+        sroot.insert(0, upd)
+    if target_lang:
+        tfl = sroot.find(f"{{{_W}}}themeFontLang")
+        if tfl is None:
+            tfl = etree.SubElement(sroot, f"{{{_W}}}themeFontLang")
+        tfl.set(f"{{{_W}}}val", target_lang)
+    data["word/settings.xml"] = _serialize(sroot)
+
+    if target_lang:
+        for name in list(data):
+            if not _LANG_PARTS.match(name):
+                continue
+            root = etree.fromstring(data[name])
+            for lang_el in root.iter(f"{{{_W}}}lang"):   # rewrite existing
+                lang_el.set(f"{{{_W}}}val", target_lang)
+            if name == "word/styles.xml":
+                _ensure_docdefaults_lang(root, target_lang)
+            else:
+                # Set an EXPLICIT lang on every run so the language survives concatenation
+                # (docxcompose adopts the master's docDefaults; inherited langs would be lost).
+                _set_run_langs(root, target_lang)
+            data[name] = _serialize(root)
+
     tmp = docx_path.with_suffix(".tmp.docx")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
         for n, d in data.items():

@@ -63,4 +63,8 @@ def combine(cfg: Config, en_docx: str | Path, fr_docx: str | Path,
     out = Path(out_docx)
     out.parent.mkdir(parents=True, exist_ok=True)
     composer.save(str(out))
+    # Refresh fields (both TOCs) on open. Don't set a language: each half keeps its own
+    # (the French draft is already fr-CA, the English source stays English).
+    from .okapi import finalize_docx
+    finalize_docx(out, target_lang=None, update_fields=True)
     return out

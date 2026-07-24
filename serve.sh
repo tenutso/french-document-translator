@@ -57,6 +57,26 @@ case "$cmd" in
       echo "running (pid $(cat "$PID_FILE"))"
     else echo "not running"; fi
     ;;
+  ensure)
+    # Start the engine if it isn't healthy yet, then wait until it is. Idempotent — safe
+    # to call before every job (the web UI does this to auto-start vLLM).
+    eval "$(read_cfg)"
+    if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+      echo "engine already healthy"; exit 0
+    fi
+    bash "$0" start
+    echo "waiting for engine to become healthy..."
+    for _ in $(seq 1 160); do
+      if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
+        echo "engine healthy"; exit 0
+      fi
+      if [[ -f "$PID_FILE" ]] && ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "engine process died — see $LOG_FILE"; exit 1
+      fi
+      sleep 3
+    done
+    echo "engine did not become healthy in time — see $LOG_FILE"; exit 1
+    ;;
   logs) tail -f "$LOG_FILE" ;;
-  *) echo "usage: bash serve.sh {start|stop|status|logs}"; exit 1 ;;
+  *) echo "usage: bash serve.sh {start|stop|status|ensure|logs}"; exit 1 ;;
 esac

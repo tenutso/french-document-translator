@@ -74,7 +74,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 def index() -> str:
     up = _vllm_up()
     health = (f'<p>Translation engine: <span class="{"up" if up else "down"}">'
-              f'{"● online" if up else "● offline — run serve.sh"}</span></p>')
+              f'{"● online" if up else "● offline — starts automatically on upload"}</span></p>')
     rows = ""
     for job in sorted(JOBS.glob("*/"), reverse=True):
         if not (job / "state").exists() and not (job / "run.log").exists():
@@ -114,9 +114,11 @@ async def create_job(file: UploadFile = File(...)):
     (jd / "filename").write_text(file.filename)
     (jd / "state").write_text("running")
 
-    # Detached runner: translate (skip GPU-contending QE) -> package -> record state.
+    # Detached runner: auto-start the engine -> translate (skip GPU-contending QE)
+    # -> package -> record state.
     cmd = (
         f'source "{ENV_FILE}"; cd "{REPO}"; '
+        f'bash "{REPO}/serve.sh" ensure >> "{jd}/run.log" 2>&1; '
         f'qc-translate run "{upload}" --out "{jd}" --skip-qe >> "{jd}/run.log" 2>&1; rc=$?; '
         f'if [ $rc -eq 0 ]; then qc-translate package "{jd}" >> "{jd}/run.log" 2>&1; fi; '
         f'echo $rc > "{jd}/returncode"; '

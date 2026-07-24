@@ -25,6 +25,7 @@ _qc_import_pid1() {
       [[ -n "$v" ]] && export "$k=$v"
     fi
   done
+  return 0   # never let an empty last key make the function (and a set -e caller) fail
 }
 _qc_import_pid1 HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_HOME GITHUB_TOKEN GH_TOKEN
 

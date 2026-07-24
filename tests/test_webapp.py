@@ -48,6 +48,9 @@ def test_upload_creates_job_and_launches(client):
     assert (jd / "filename").read_text() == "Manual.docx"
     assert list(jd.glob("input_*.docx"))          # sanitized upload saved
     assert "cmd" in launched                        # pipeline was launched
+    runner = launched["cmd"][0][3]                  # ["setsid","bash","-c", <cmd>]
+    assert "serve.sh" in runner and "ensure" in runner   # engine auto-start
+    assert "qc-translate run" in runner
 
 
 def test_unknown_job_404(client):

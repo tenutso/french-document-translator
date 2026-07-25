@@ -35,13 +35,30 @@ def main() -> int:
         return 0
 
     rc = 0
+    failed: list[str] = []
     for repo in dict.fromkeys(models):  # dedupe, keep order
         try:
             print(f"[fetch_weights] downloading {repo} ...")
             snapshot_download(repo_id=repo)
         except Exception as e:  # noqa: BLE001 - prefetch is best-effort
             print(f"[fetch_weights] WARN could not fetch {repo}: {e}", file=sys.stderr)
+            failed.append(repo)
             rc = 1
+
+    if failed:
+        # Prefetch stays best-effort (a pod may legitimately defer to lazy download), but make
+        # an interrupted/failed download impossible to miss: without weights the vLLM engine
+        # never starts and jobs silently fall back to an English-only passthrough.
+        print(
+            "\n"
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            "  MODEL WEIGHTS NOT DOWNLOADED: " + ", ".join(failed) + "\n"
+            "  The translation engine will NOT start and documents will come back\n"
+            "  in ENGLISH (silent passthrough). Fix network/HF_TOKEN, then re-run:\n"
+            "      python scripts/fetch_weights.py\n"
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
+            file=sys.stderr,
+        )
     return rc
 
 

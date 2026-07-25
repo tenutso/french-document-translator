@@ -98,6 +98,29 @@ def run(
         console.print("[bold]7/7[/] Images skipped")
 
     tm.close()
+
+    # Guard against a silent English passthrough: if the engine was down/unreachable, every
+    # segment falls back to its English source (flagged translation_failed / degenerate_output).
+    # Denominator is the translatable segments only (non-empty source that isn't an exact TM
+    # reuse) so TM-only jobs aren't miscounted.
+    from .tm import plain
+    _FAIL_FLAGS = {"translation_failed", "degenerate_output"}
+    translatable = [s for s in segments if plain(s.source_xml) and s.tm_exact is None]
+    failed = [s for s in translatable if _FAIL_FLAGS & set(s.qa_flags)]
+    if translatable and len(failed) == len(translatable):
+        console.print(
+            f"\n[bold red]Translation failed:[/] all {len(failed)} translatable segments fell "
+            "back to the English source. The translation engine is almost certainly not "
+            "running or not reachable — no French was produced.\n"
+            "Check it with [bold]bash serve.sh status[/] / [bold]bash serve.sh ensure[/] and "
+            "see [bold]/workspace/vllm.log[/]. Not writing a 'done' result for an "
+            "English-only document.")
+        raise typer.Exit(code=1)
+    if failed:
+        console.print(
+            f"[bold yellow]Warning:[/] {len(failed)}/{len(translatable)} segments could not be "
+            "translated and kept their English source (see qa_report.html).")
+
     flagged = sum(1 for s in segments if s.needs_review)
     console.print(f"\n[green]Done.[/] {flagged}/{len(segments)} segments flagged for review.")
     console.print(f"Artifacts in [bold]{out}[/]: translated.xlf, {job}.fr-CA.draft.docx, "

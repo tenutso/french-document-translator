@@ -115,12 +115,18 @@ async def create_job(file: UploadFile = File(...)):
     (jd / "state").write_text("running")
 
     # Detached runner: auto-start the engine -> translate (skip GPU-contending QE)
-    # -> package -> record state.
+    # -> package -> record state. If the engine never becomes healthy, `serve.sh ensure`
+    # exits non-zero; gate the translate step on it so a dead engine fails the job loudly
+    # instead of producing an English-only passthrough.
     cmd = (
         f'source "{ENV_FILE}"; cd "{REPO}"; '
-        f'bash "{REPO}/serve.sh" ensure >> "{jd}/run.log" 2>&1; '
-        f'qc-translate run "{upload}" --out "{jd}" --skip-qe >> "{jd}/run.log" 2>&1; rc=$?; '
-        f'if [ $rc -eq 0 ]; then qc-translate package "{jd}" >> "{jd}/run.log" 2>&1; fi; '
+        f'if bash "{REPO}/serve.sh" ensure >> "{jd}/run.log" 2>&1; then '
+        f'  qc-translate run "{upload}" --out "{jd}" --skip-qe >> "{jd}/run.log" 2>&1; rc=$?; '
+        f'  if [ $rc -eq 0 ]; then qc-translate package "{jd}" >> "{jd}/run.log" 2>&1; fi; '
+        f'else '
+        f'  echo "ERROR: translation engine did not become healthy — see /workspace/vllm.log" '
+        f'    >> "{jd}/run.log" 2>&1; rc=1; '
+        f'fi; '
         f'echo $rc > "{jd}/returncode"; '
         f'[ $rc -eq 0 ] && echo done > "{jd}/state" || echo error > "{jd}/state"'
     )

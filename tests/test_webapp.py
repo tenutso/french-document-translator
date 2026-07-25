@@ -57,3 +57,62 @@ def test_unknown_job_404(client):
     c, _, _ = client
     assert c.get("/jobs/nope").status_code == 404
     assert c.get("/jobs/nope/download").status_code == 404
+
+
+def _done_job(jobs: Path, jid: str = "job1") -> Path:
+    """A completed job dir: has translated.xlf (what import-review aligns against) + state=done."""
+    jd = jobs / jid
+    jd.mkdir()
+    (jd / "translated.xlf").write_text("<xliff/>")
+    (jd / "state").write_text("done")
+    (jd / "filename").write_text("Manual.docx")
+    return jd
+
+
+def test_submit_review_launches(client):
+    c, jobs, launched = client
+    jd = _done_job(jobs)
+    r = c.post(f"/jobs/{jd.name}/review",
+               files={"file": ("reviewed.xlf", b"<xliff/>", "application/xml")},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert (jd / "review_state").read_text() == "running"
+    assert list(jd.glob("reviewed_*.xlf"))                 # sanitized reviewed file saved
+    runner = launched["cmd"][0][3]                          # ["setsid","bash","-c", <cmd>]
+    assert "import-review" in runner and "--job" in runner
+    assert "qc-translate merge" in runner                   # .xlf path re-merges to final docx
+
+
+def test_submit_review_docx_no_merge(client):
+    c, jobs, launched = client
+    jd = _done_job(jobs, "job2")
+    r = c.post(f"/jobs/{jd.name}/review",
+               files={"file": ("reviewed.docx", b"PK\x03\x04", "application/octet-stream")},
+               follow_redirects=False)
+    assert r.status_code == 303
+    runner = launched["cmd"][0][3]
+    assert "import-review" in runner
+    assert 'cp "' in runner                                 # reviewed .docx is copied as final
+
+
+def test_submit_review_rejects_bad_ext(client):
+    c, jobs, _ = client
+    _done_job(jobs, "job3")
+    r = c.post("/jobs/job3/review",
+               files={"file": ("notes.txt", b"hi", "text/plain")})
+    assert r.status_code == 400
+
+
+def test_submit_review_requires_completed_job(client):
+    c, jobs, _ = client
+    (jobs / "job4").mkdir()                                 # exists but no translated.xlf
+    r = c.post("/jobs/job4/review",
+               files={"file": ("reviewed.xlf", b"<xliff/>", "application/xml")})
+    assert r.status_code == 400
+
+
+def test_final_and_tmx_404_when_absent(client):
+    c, jobs, _ = client
+    jd = _done_job(jobs, "job5")
+    assert c.get(f"/jobs/{jd.name}/final").status_code == 404
+    assert c.get(f"/jobs/{jd.name}/tmx").status_code == 404   # no review submitted yet

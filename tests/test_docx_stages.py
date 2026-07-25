@@ -105,6 +105,10 @@ def test_package_builds_zip(tmp_path: Path):
     names = zipfile.ZipFile(zip_path).namelist()
     assert "REVIEW_INSTRUCTIONS.md" in names
     assert "sample.fr-CA.draft.docx" in names and "qa_report.html" in names
+    # CAT-tool interchange files: TM (TMX) + glossary (TBX) travel with the package so a
+    # reviewer can import them into Smartcat / OmegaT.
+    assert "qc_translate.tmx" in names
+    assert "brand_glossary.tbx" in names
 
 
 def test_finalize_docx_sets_language_and_fields(tmp_path: Path):

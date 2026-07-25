@@ -41,6 +41,22 @@ def _state(job: Path) -> str:
     return f.read_text().strip() if f.exists() else "unknown"
 
 
+def _review_state(job: Path) -> str | None:
+    """State of the reviewer-round-trip step, or None if no reviewed file was submitted yet."""
+    f = job / "review_state"
+    return f.read_text().strip() if f.exists() else None
+
+
+def _spawn(cmd: str) -> None:
+    """Launch a detached pipeline step that survives a web-server restart.
+
+    setsid + a new session so the job keeps running after the request returns; state and log
+    are tracked via files in the job dir (the page polls them).
+    """
+    subprocess.Popen(["setsid", "bash", "-c", cmd],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _vllm_up() -> bool:
     base = CFG.llm["base_url"].rsplit("/v1", 1)[0]
     try:
@@ -130,8 +146,54 @@ async def create_job(file: UploadFile = File(...)):
         f'echo $rc > "{jd}/returncode"; '
         f'[ $rc -eq 0 ] && echo done > "{jd}/state" || echo error > "{jd}/state"'
     )
-    subprocess.Popen(["setsid", "bash", "-c", cmd],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _spawn(cmd)
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+_REVIEW_EXTS = (".docx", ".xlf", ".xliff")
+
+
+@app.post("/jobs/{jid}/review")
+async def submit_review(jid: str, file: UploadFile = File(...)):
+    """Fold a reviewer's corrected file back into the TM (and re-merge if it's an XLIFF).
+
+    Accepts a reviewed .docx (fuzzy-aligned) or .xlf/.xliff (id-exact). Needs no vLLM engine,
+    so it runs even while the engine is stopped.
+    """
+    if not file.filename or not file.filename.lower().endswith(_REVIEW_EXTS):
+        raise HTTPException(400, "Please upload the reviewed .docx or .xlf file")
+    jd = JOBS / _safe_name(jid)
+    if not jd.exists():
+        raise HTTPException(404, "job not found")
+    # A completed job leaves translated.xlf (and source.docx.xlf) behind; import-review aligns
+    # the reviewed file against them.
+    if not (jd / "translated.xlf").exists():
+        raise HTTPException(400, "Finish the translation for this job before submitting a review")
+    if not ENV_FILE.exists():
+        raise HTTPException(500, "Run bootstrap.sh first (.env.runtime missing)")
+
+    reviewed = jd / ("reviewed_" + _safe_name(file.filename))
+    with open(reviewed, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    (jd / "review_state").write_text("running")
+
+    # Detached runner: import-review updates the TM; for an XLIFF we also merge back to a final
+    # DOCX (for a reviewed .docx, that file is itself the deliverable). No engine needed.
+    final = jd / "final.fr-CA.docx"
+    cmd = (
+        f'source "{ENV_FILE}"; cd "{REPO}"; '
+        f'qc-translate import-review "{reviewed}" --job "{jd}" >> "{jd}/review.log" 2>&1; rc=$?; '
+        f'if [ $rc -eq 0 ]; then '
+        f'  case "{reviewed}" in '
+        f'    *.xlf|*.xliff) qc-translate merge "{reviewed}" -o "{final}" '
+        f'                     --original "{jd}/source.docx" >> "{jd}/review.log" 2>&1; rc=$?;; '
+        f'    *) cp "{reviewed}" "{final}";; '
+        f'  esac; '
+        f'fi; '
+        f'echo $rc > "{jd}/review_returncode"; '
+        f'[ $rc -eq 0 ] && echo done > "{jd}/review_state" || echo error > "{jd}/review_state"'
+    )
+    _spawn(cmd)
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
@@ -146,10 +208,43 @@ def job_status(jid: str) -> str:
     pkg = _package_path(jd)
     dl = (f'<p><a href="/jobs/{jd.name}/download"><button>Download review package</button></a></p>'
           if pkg else "")
-    refresh = '<meta http-equiv="refresh" content="5">' if st == "running" else ""
+
+    # Step 2 — reviewer round-trip. Available once the translation job is done.
+    rst = _review_state(jd)
+    review_html = ""
+    if st == "done":
+        review_html = (
+            '<div class="card"><h2 style="font-size:1.1rem">Step 2 — submit reviewed file</h2>'
+            '<p>After the reviewer edits the French <code>.docx</code> (Word) or the bilingual '
+            'XLIFF (Smartcat/OmegaT), upload it here to fold their corrections into the '
+            'translation memory and produce the final document. No engine needed.</p>'
+            f'<form action="/jobs/{jd.name}/review" method="post" enctype="multipart/form-data">'
+            '<input type="file" name="file" accept=".docx,.xlf,.xliff" required><br>'
+            '<button type="submit">Submit review</button></form>')
+        if rst:
+            rlog = ((jd / "review.log").read_text(errors="replace")[-8000:]
+                    if (jd / "review.log").exists() else "")
+            rdl = ""
+            if rst == "done":
+                links = []
+                if (jd / "final.fr-CA.docx").exists():
+                    links.append(f'<a href="/jobs/{jd.name}/final">'
+                                 '<button>Download final French .docx</button></a>')
+                links.append(f'<a href="/jobs/{jd.name}/tmx">'
+                             '<button>Download updated TM (.tmx)</button></a>')
+                rdl = "<p>" + " ".join(links) + "</p>"
+            review_html += (
+                f'<p>Review status: <span class="badge {rst}">{rst}</span></p>{rdl}'
+                f'<h3 style="font-size:1rem">Review log</h3>'
+                f'<pre>{html.escape(rlog) or "(waiting…)"}</pre>')
+        review_html += "</div>"
+
+    refresh = ('<meta http-equiv="refresh" content="5">'
+               if st == "running" or rst == "running" else "")
     body = (f'<p><a href="/">← all jobs</a></p><h1>{html.escape(name)}</h1>'
             f'<p>Status: <span class="badge {st}">{st}</span></p>{dl}'
-            f'<h2 style="font-size:1.1rem">Log</h2><pre>{html.escape(log) or "(waiting…)"}</pre>')
+            f'<h2 style="font-size:1.1rem">Log</h2><pre>{html.escape(log) or "(waiting…)"}</pre>'
+            f'{review_html}')
     return PAGE.format(refresh=refresh, body=body)
 
 
@@ -167,6 +262,30 @@ def job_download(jid: str):
     if not pkg:
         raise HTTPException(404, "package not ready")
     return FileResponse(str(pkg), filename=pkg.name, media_type="application/zip")
+
+
+@app.get("/jobs/{jid}/final")
+def job_final(jid: str):
+    """Download the post-review final French DOCX (merged XLIFF, or the reviewed .docx itself)."""
+    jd = JOBS / _safe_name(jid)
+    final = jd / "final.fr-CA.docx"
+    if not final.exists():
+        raise HTTPException(404, "no reviewed final document yet")
+    name = (jd / "filename").read_text().strip() if (jd / "filename").exists() else jd.name
+    dl_name = f"{Path(name).stem}.fr-CA.final.docx"
+    return FileResponse(str(final), filename=dl_name,
+                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@app.get("/jobs/{jid}/tmx")
+def job_tmx(jid: str):
+    """Download the translation memory (TMX) the reviewer's corrections were folded into."""
+    if not (JOBS / _safe_name(jid) / "review_state").exists():
+        raise HTTPException(404, "no review submitted yet")
+    tmx = Path(CFG.tm["tmx_export"])
+    if not tmx.exists():
+        raise HTTPException(404, "TMX not available")
+    return FileResponse(str(tmx), filename="qc_translate.tmx", media_type="application/xml")
 
 
 @app.get("/health", response_class=PlainTextResponse)

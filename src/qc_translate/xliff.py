@@ -105,8 +105,9 @@ def codes_mergeable(src_xml: str, tgt_xml: str) -> bool:
 
     Okapi matches codes by id, so a valid translation may reorder inline spans (e.g. two
     bold phrases swap). We require: (1) the same multiset of codes as the source, and
-    (2) well-formed pairing — each bpt#k precedes its ept#k. This is stricter than merge
-    actually needs but safe, and far less trigger-happy than exact-order codes_match.
+    (2) well-formed pairing — each opening code precedes its closing mate (bpt#k before
+    ept#k, it#k/open before it#k/close). This is stricter than merge actually needs but
+    safe, and far less trigger-happy than exact-order codes_match.
     """
     from collections import Counter
     src_ids = inline_code_ids(src_xml)
@@ -117,18 +118,29 @@ def codes_mergeable(src_xml: str, tgt_xml: str) -> bool:
     for i, tok in enumerate(tgt_ids):
         first.setdefault(tok, i)
     for tok in tgt_ids:
-        if tok.startswith("bpt#"):
-            ept = "ept#" + tok.split("#", 1)[1]
-            if ept in first and first[tok] > first[ept]:
-                return False
+        mate = _closing_mate(tok)
+        if mate is not None and mate in first and first[tok] > first[mate]:
+            return False
     return True
+
+
+def _closing_mate(tok: str) -> str | None:
+    """The identity token that must follow `tok`, or None if `tok` isn't an opening code."""
+    if tok.startswith("bpt#"):
+        return "ept#" + tok.split("#", 1)[1]
+    if tok.endswith("/open"):
+        return tok[: -len("open")] + "close"
+    return None
 
 
 def inline_code_ids(xml: str) -> list[str]:
     """Ordered list of inline-code identity tokens in a source/target string.
 
     Used by QA to assert the target preserves exactly the same inline codes as the
-    source. We key on tag name + id attribute so order and multiplicity are checked.
+    source. We key on tag name + id attribute so order and multiplicity are checked,
+    plus `pos` for <it>: an isolated code carries its open/close role in that attribute
+    rather than in the tag name, so without it an inverted pair (close before open —
+    which Okapi refuses to merge) is indistinguishable from a correct one.
     """
     ids: list[str] = []
     for m in re.finditer(r"<\s*(\w+)([^>]*?)/?>", xml):
@@ -136,7 +148,9 @@ def inline_code_ids(xml: str) -> list[str]:
         if tag in _INLINE_TAGS:
             attrs = m.group(2)
             id_m = re.search(r'\bid\s*=\s*"([^"]*)"', attrs)
-            ids.append(f"{tag}#{id_m.group(1) if id_m else ''}")
+            pos_m = re.search(r'\bpos\s*=\s*"([^"]*)"', attrs)
+            tok = f"{tag}#{id_m.group(1) if id_m else ''}"
+            ids.append(f"{tok}/{pos_m.group(1)}" if pos_m else tok)
     return ids
 
 

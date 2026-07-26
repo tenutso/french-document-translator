@@ -20,6 +20,9 @@ from .xliff import codes_mergeable, mask_inline, unmask_inline, visible_text
 _MINIMAL_SYSTEM = ("Translate the text from English into {tgt} (Quebec French). "
                    "Keep any ⟦N⟧ placeholders verbatim. Output only the translation.")
 
+# Flags whose handling leaves seg.target_xml holding the English source, not a translation.
+_FALLBACK_FLAGS = ("translation_failed", "degenerate_output", "tag_mismatch")
+
 
 def _degenerate(src_plain: str, tgt_plain: str) -> bool:
     """Heuristic for a broken translation (e.g. the model echoed the instructions).
@@ -32,25 +35,51 @@ def _degenerate(src_plain: str, tgt_plain: str) -> bool:
 
 
 _PH_NUM = re.compile(r"⟦\s*(\d+)\s*⟧")
-_OPENING = re.compile(r"<(bpt|g|bx)\b")
+# An <it> is an *isolated* code whose open/close role lives in pos=, not the tag name.
+_OPENING = re.compile(r'<(bpt|g|bx)\b|<it\b[^>]*\bpos\s*=\s*"open"')
 
 
 def _placeholders_present(text: str) -> set[int]:
     return {int(x) for x in _PH_NUM.findall(text)}
 
 
+def _anchor_pos(content: str, n: int, *, end: bool) -> int | None:
+    """Offset just after (end=True) or just before the ⟦n⟧ placeholder, None if absent."""
+    m = re.search(rf"⟦\s*{n}\s*⟧", content)
+    if m is None:
+        return None
+    return m.end() if end else m.start()
+
+
 def _repair_placeholders(content: str, codes: list[str]) -> str:
     """Re-insert any placeholders the model dropped so the code set matches the source.
 
-    Openings (bpt/g/bx) are prepended, closings/standalone appended. This keeps the
-    translation (French) mergeable instead of reverting the whole segment to English;
-    formatting may wrap slightly differently, which QA flags as codes_repaired.
+    A dropped code is confined to the gap between its surviving neighbours (after ⟦i-1⟧,
+    before ⟦i+1⟧) so the restored order still follows the source; within that gap an
+    opening goes to the earliest spot and a closing to the latest, so the pair wraps as
+    much text as it legitimately can. With no neighbour on that side the gap runs to the
+    start/end of the segment, which reproduces the old prepend/append behaviour.
+
+    Order matters beyond tidiness: Okapi refuses to merge a unit whose closing code
+    precedes its opening, so appending an opening unconditionally could turn one dropped
+    code into a hard merge failure. This keeps the translation (French) mergeable instead
+    of reverting the whole segment to English; formatting may wrap slightly differently,
+    which QA flags as codes_repaired.
     """
     present = _placeholders_present(content)
     for i, code in enumerate(codes, 1):
         if i in present:
             continue
-        content = f"⟦{i}⟧" + content if _OPENING.match(code) else content + f"⟦{i}⟧"
+        if _OPENING.match(code):
+            prev = max((j for j in present if j < i), default=None)
+            at = None if prev is None else _anchor_pos(content, prev, end=True)
+            at = 0 if at is None else at
+        else:
+            nxt = min((j for j in present if j > i), default=None)
+            at = None if nxt is None else _anchor_pos(content, nxt, end=False)
+            at = len(content) if at is None else at
+        content = content[:at] + f"⟦{i}⟧" + content[at:]
+        present.add(i)
     return content
 
 
@@ -259,7 +288,15 @@ def translate_segments(cfg: Config, segments: list[Segment], tm: TranslationMemo
         system = build_system_prompt(cfg)
         VLLMClient(cfg).translate(to_translate, system)
 
-    # Update TM with fresh translations (skip failures).
+    # Update TM with genuine translations only. Two kinds of segment are withheld:
+    # those that fell back to their English source, and any target whose inline codes
+    # won't merge. Caching either is worse than not caching at all — `tm.exact` would
+    # serve it straight back on the next run, skipping the retry/repair path that would
+    # otherwise fix it, and an unmergeable hit then gets reverted to English by the
+    # merge-safety guard in cli.
     for seg in to_translate:
-        if seg.target_xml and "translation_failed" not in " ".join(seg.qa_flags):
-            tm.upsert(seg.source_xml, seg.target_xml)
+        if not seg.target_xml or any(f in _FALLBACK_FLAGS for f in seg.qa_flags):
+            continue
+        if not codes_mergeable(seg.source_xml, seg.target_xml):
+            continue
+        tm.upsert(seg.source_xml, seg.target_xml)

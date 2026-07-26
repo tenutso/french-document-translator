@@ -197,6 +197,40 @@ def test_repair_placeholders():
     assert _placeholders_present(fixed2) == {1, 2} and fixed2.endswith("⟦2⟧")
 
 
+def test_repair_keeps_isolated_code_pair_in_order():
+    """A dropped <it pos="open"> must not land after its pos="close" mate.
+
+    Regression: `pos` lives in an attribute, not the tag name, so an <it> opening used to
+    fall through to the append branch and end up at the very end of the segment — past
+    its own close. Okapi then aborts the whole merge with "Unexpected code contents for
+    closing code".
+    """
+    from qc_translate.translate import _repair_placeholders, _placeholders_present
+    from qc_translate.xliff import codes_mergeable, unmask_inline
+
+    codes = ['<it id="4" pos="open">&lt;run4&gt;</it>',
+             '<it id="4" pos="close">&lt;/run4&gt;</it>',
+             '<bpt id="5">&lt;run5&gt;</bpt>', '<ept id="5">&lt;/run5&gt;</ept>']
+    source = unmask_inline("⟦1⟧ cette année, avec un total approchant ⟦2⟧600 000 $⟦3⟧.⟦4⟧", codes)
+
+    # Model kept everything but the isolated opening.
+    fixed = _repair_placeholders(" cette année, avec un total approchant ⟦2⟧600 000 $⟦3⟧.⟦4⟧", codes)
+    assert _placeholders_present(fixed) == {1, 2, 3, 4}
+    assert fixed.index("⟦1⟧") < fixed.index("⟦2⟧")
+    assert codes_mergeable(source, unmask_inline(fixed, codes))
+
+
+def test_codes_mergeable_rejects_inverted_isolated_pair():
+    """codes_mergeable is the last line of defence before an unmergeable XLIFF ships."""
+    from qc_translate.xliff import codes_mergeable, unmask_inline
+
+    codes = ['<it id="4" pos="open">&lt;run4&gt;</it>', '<it id="4" pos="close">&lt;/run4&gt;</it>']
+    source = unmask_inline("⟦1⟧texte⟦2⟧", codes)
+    assert codes_mergeable(source, unmask_inline("⟦1⟧texte⟦2⟧", codes))
+    # Same multiset of codes, but the close now precedes the open -> Okapi would abort.
+    assert not codes_mergeable(source, unmask_inline("⟦2⟧texte⟦1⟧", codes))
+
+
 def test_is_allcaps():
     from qc_translate.translate import _is_allcaps
     assert _is_allcaps("KEYS TO BUILD A SPEAKING BUSINESS")

@@ -89,7 +89,9 @@ def test_import_review_xliff_updates_tm(tmp_path: Path):
     updated, total = import_review(cfg, reviewed, job)
     assert updated == 1
     tm = TranslationMemory(cfg.tm["db"])
-    assert "Enregistrer" in (tm.exact("Click Save now.") or "")
+    hit = tm.exact("Click Save now.")
+    assert hit is not None and "Enregistrer" in hit[0]
+    assert hit[1] == "approved", "a reviewed segment must be recorded as approved"
     tm.close()
 
 

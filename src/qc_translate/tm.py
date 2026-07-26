@@ -1,22 +1,46 @@
 """Translation memory: SQLite store with exact + fuzzy lookup and TMX export.
 
-Keyed on the *plain text* of the source (inline codes stripped) so reuse survives minor
-tag differences. Fuzzy match uses a cheap token-ratio; good enough to surface references
-for the LLM and for the human reviewer.
+Keyed on the *human-visible text* of the source (inline codes and the Word markup they
+carry removed) so reuse survives the run re-splitting Word does on almost every edit —
+that is what lets an approved translation carry across document revisions. Fuzzy match
+uses a cheap token-ratio; good enough to surface references for the LLM and the reviewer.
+
+Each entry records its `origin`: 'approved' for wording a human signed off via
+import-review, 'mt' for raw machine output. Approved entries outrank machine ones
+everywhere — they are never overwritten by MT, and they sort first as prompt references.
 """
 from __future__ import annotations
 
-import re
 import sqlite3
 from difflib import SequenceMatcher
 from pathlib import Path
 
-_TAG = re.compile(r"<[^>]+>")
+from .xliff import visible_text
+
+APPROVED = "approved"
+MT = "mt"
+
+# Bump when the on-disk layout changes; _ensure_schema migrates once, gated on this.
+_SCHEMA_VERSION = 1
 
 
 def plain(xml: str) -> str:
-    """Strip inline tags and collapse whitespace for TM keying/comparison."""
-    return re.sub(r"\s+", " ", _TAG.sub("", xml)).strip()
+    """Human-visible text of a segment, for TM keying/comparison.
+
+    Delegates to `xliff.visible_text` so TM keys, QA's number check and the reports all
+    agree on what counts as text. Merely regex-stripping tags is not enough: native inline
+    codes carry their Word markup as *escaped* content, so `<bpt id="1">&lt;run1&gt;</bpt>`
+    would leave `&lt;run1&gt;` behind. That pollutes the key — Word renumbers those runs on
+    almost any edit, silently losing the match — and feeds a stray digit to `qa._numbers()`.
+    """
+    return visible_text(xml)
+
+
+def _outranks(new: tuple[str, str], old: tuple[str, str]) -> bool:
+    """True if (origin, updated) `new` should win over `old`. Approved beats MT."""
+    if (new[0] == APPROVED) != (old[0] == APPROVED):
+        return new[0] == APPROVED
+    return (new[1] or "") >= (old[1] or "")
 
 
 class TranslationMemory:
@@ -24,54 +48,109 @@ class TranslationMemory:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.execute(
+        self._ensure_schema()
+        # In-memory cache of source keys for the fuzzy scan.
+        self._keys = [r[0] for r in self.conn.execute("SELECT src_plain FROM tm")]
+
+    def _ensure_schema(self) -> None:
+        """Create the table, and migrate a legacy store once (gated on user_version).
+
+        Legacy rows were keyed by a `plain()` that left escaped Word markup in the key, so
+        every one of those keys is stale under the current function. Rekeying happens here
+        rather than behind a separate command so every entry point — CLI, web UI, tests —
+        gets a consistent store without anyone having to remember a migration step.
+        """
+        conn = self.conn
+        conn.execute(
             """CREATE TABLE IF NOT EXISTS tm (
                    src_plain TEXT PRIMARY KEY,
                    src_xml   TEXT NOT NULL,
                    tgt_xml   TEXT NOT NULL,
+                   origin    TEXT NOT NULL DEFAULT 'mt',
                    updated   TEXT DEFAULT CURRENT_TIMESTAMP
                )"""
         )
-        self.conn.commit()
-        # In-memory cache of source plaintexts for fuzzy scan.
-        self._keys = [r[0] for r in self.conn.execute("SELECT src_plain FROM tm")]
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= _SCHEMA_VERSION:
+            conn.commit()
+            return
+        if "origin" not in {r[1] for r in conn.execute("PRAGMA table_info(tm)")}:
+            conn.execute(f"ALTER TABLE tm ADD COLUMN origin TEXT NOT NULL DEFAULT '{MT}'")
+        self._rekey()
+        conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+        conn.commit()
 
-    def exact(self, source_xml: str) -> str | None:
+    def _rekey(self) -> int:
+        """Recompute every key with the current `plain()`. Returns rows dropped.
+
+        Two old keys can collapse onto one new key (that is the point — they differed only
+        in Word markup), so collisions are resolved the same way `upsert` would: approved
+        wins, then the newer row. A row whose visible text is empty is dropped; `upsert`
+        refuses empty keys, so it could never have been matched anyway.
+        """
+        rows = self.conn.execute(
+            "SELECT src_xml, tgt_xml, origin, updated FROM tm"
+        ).fetchall()
+        best: dict[str, tuple[str, str, str, str]] = {}
+        dropped = 0
+        for src_xml, tgt_xml, origin, updated in rows:
+            key = plain(src_xml)
+            if not key:
+                dropped += 1
+                continue
+            cur = best.get(key)
+            if cur is None or _outranks((origin, updated), (cur[2], cur[3])):
+                best[key] = (src_xml, tgt_xml, origin, updated)
+        self.conn.execute("DELETE FROM tm")
+        self.conn.executemany(
+            "INSERT INTO tm(src_plain, src_xml, tgt_xml, origin, updated) VALUES(?,?,?,?,?)",
+            [(k, s, t, o, u) for k, (s, t, o, u) in best.items()],
+        )
+        return dropped
+
+    def exact(self, source_xml: str) -> tuple[str, str] | None:
+        """Return (target_xml, origin) for an exact visible-text match, else None."""
         row = self.conn.execute(
-            "SELECT tgt_xml FROM tm WHERE src_plain = ?", (plain(source_xml),)
+            "SELECT tgt_xml, origin FROM tm WHERE src_plain = ?", (plain(source_xml),)
         ).fetchone()
-        return row[0] if row else None
+        return (row[0], row[1]) if row else None
 
     def fuzzy(self, source_xml: str, threshold: float, limit: int = 3
-              ) -> list[tuple[str, str, float]]:
-        """Return up to `limit` (src_xml, tgt_xml, score) above threshold, best first."""
+              ) -> list[tuple[str, str, float, str]]:
+        """Return up to `limit` (src_xml, tgt_xml, score, origin) above threshold.
+
+        Approved entries sort ahead of machine output whatever the score, so the prompt
+        shows the reviewer's wording first instead of handing the model its own earlier
+        guesses as if they were house style.
+        """
         q = plain(source_xml)
-        scored: list[tuple[str, float]] = []
+        out: list[tuple[str, str, float, str]] = []
         for key in self._keys:
             if key == q:
                 continue
-            r = SequenceMatcher(None, q, key).ratio()
-            if r >= threshold:
-                scored.append((key, r))
-        scored.sort(key=lambda t: t[1], reverse=True)
-        out: list[tuple[str, str, float]] = []
-        for key, score in scored[:limit]:
+            score = SequenceMatcher(None, q, key).ratio()
+            if score < threshold:
+                continue
             row = self.conn.execute(
-                "SELECT src_xml, tgt_xml FROM tm WHERE src_plain = ?", (key,)
+                "SELECT src_xml, tgt_xml, origin FROM tm WHERE src_plain = ?", (key,)
             ).fetchone()
             if row:
-                out.append((row[0], row[1], score))
-        return out
+                out.append((row[0], row[1], score, row[2]))
+        out.sort(key=lambda t: (t[3] != APPROVED, -t[2]))
+        return out[:limit]
 
-    def upsert(self, source_xml: str, target_xml: str) -> None:
+    def upsert(self, source_xml: str, target_xml: str, origin: str = MT) -> None:
+        """Store a translation. Machine output never overwrites approved wording."""
         key = plain(source_xml)
         if not key:
             return
+        # The WHERE on DO UPDATE is evaluated against the conflicting row, so an 'mt'
+        # write silently no-ops when a human has already approved this source.
         self.conn.execute(
-            "INSERT INTO tm(src_plain, src_xml, tgt_xml) VALUES(?,?,?) "
+            "INSERT INTO tm(src_plain, src_xml, tgt_xml, origin) VALUES(?,?,?,?) "
             "ON CONFLICT(src_plain) DO UPDATE SET tgt_xml=excluded.tgt_xml, "
-            "src_xml=excluded.src_xml, updated=CURRENT_TIMESTAMP",
-            (key, source_xml, target_xml),
+            "src_xml=excluded.src_xml, origin=excluded.origin, updated=CURRENT_TIMESTAMP "
+            "WHERE excluded.origin = 'approved' OR tm.origin <> 'approved'",
+            (key, source_xml, target_xml, origin),
         )
         self.conn.commit()
         if key not in self._keys:

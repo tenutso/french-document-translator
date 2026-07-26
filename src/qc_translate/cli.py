@@ -42,10 +42,18 @@ def run(
     config: Path = typer.Option(None, "--config", "-c"),
     skip_qe: bool = typer.Option(False, help="Skip CometKiwi quality estimation"),
     skip_images: bool = typer.Option(False, help="Skip embedded-image OCR report"),
+    previous: Path = typer.Option(None, "--previous", exists=True,
+                                  help="Previous job dir for this document; adds the "
+                                       "before/after English to changes.html"),
 ):
-    """Run the full translation pipeline on a DOCX."""
+    """Run the full translation pipeline on a DOCX.
+
+    Re-running a revised document is the supported way to handle an edited source: the
+    translation memory reuses approved French for every segment whose text is unchanged,
+    and only new/changed segments reach the LLM. See changes.html in the job directory.
+    """
     from . import qa
-    from .translate import translate_segments, translate_text
+    from .translate import annotate_previous_sources, translate_segments, translate_text
     from .xliff import write_targets
 
     cfg = load_config(config)
@@ -65,8 +73,16 @@ def run(
     tm = TranslationMemory(cfg.tm["db"])
     translate_segments(cfg, segments, tm)
     tm.export_tmx(cfg.tm["tmx_export"], cfg.language["source"], cfg.language["target"])
+    if previous:
+        prev_xlf = previous / "source.docx.xlf"
+        if prev_xlf.exists():
+            n = annotate_previous_sources(segments, prev_xlf)
+            console.print(f"    matched {n} changed segment(s) to {previous.name}")
+        else:
+            console.print(f"[yellow]--previous:[/] {prev_xlf} not found, skipping diff")
 
     console.print("[bold]4/7[/] Writing target XLIFF")
+    from .models import STATE_BY_STATUS
     from .xliff import codes_mergeable
     target_xliff = out / "translated.xlf"
     # Merge-safety: if a target's inline codes can't merge cleanly, keep the source for
@@ -75,7 +91,10 @@ def run(
     for s in segments:
         t = s.target_xml or s.source_xml
         targets[s.unit_id] = t if codes_mergeable(s.source_xml, t) else s.source_xml
-    write_targets(xliff, targets, target_xliff)
+    # Mark each unit's revision state so a CAT tool locks settled segments on import.
+    states = {s.unit_id: STATE_BY_STATUS[s.version_status]
+              for s in segments if s.version_status in STATE_BY_STATUS}
+    write_targets(xliff, targets, target_xliff, states)
 
     console.print("[bold]5/7[/] QA checks" + ("" if skip_qe else " + quality estimation"))
     qa.run_checks(cfg, segments)
@@ -83,6 +102,12 @@ def run(
         qa.run_quality_estimation(cfg, segments)
     report.write_qa_report(out / "qa_report.html", job, segments,
                            cfg.qe.get("flag_below", 0.75))
+    report.write_changes_report(out / "changes.html", job, segments)
+    from .models import CHANGED, NEW, UNCHANGED_APPROVED
+    reused = sum(1 for s in segments if s.version_status == UNCHANGED_APPROVED)
+    fresh = sum(1 for s in segments if s.version_status in (NEW, CHANGED))
+    console.print(f"    {reused} approved segment(s) reused verbatim, "
+                  f"{fresh} new/changed (see changes.html)")
 
     console.print("[bold]6/7[/] Draft DOCX + OmegaT review project")
     okapi.merge(cfg, target_xliff, out / f"{job}.fr-CA.draft.docx")
@@ -124,7 +149,7 @@ def run(
     flagged = sum(1 for s in segments if s.needs_review)
     console.print(f"\n[green]Done.[/] {flagged}/{len(segments)} segments flagged for review.")
     console.print(f"Artifacts in [bold]{out}[/]: translated.xlf, {job}.fr-CA.draft.docx, "
-                  "qa_report.html, image_report.html, omegat_project/")
+                  "qa_report.html, changes.html, image_report.html, omegat_project/")
 
 
 @app.command()

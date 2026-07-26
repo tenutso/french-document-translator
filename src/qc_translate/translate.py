@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import httpx
 
 from .config import Config
-from .models import Segment
-from .tm import TranslationMemory, plain
+from .models import CHANGED, NEW, UNCHANGED_APPROVED, UNCHANGED_MT, Segment
+from .tm import APPROVED, MT, TranslationMemory, plain
 from .xliff import codes_mergeable, mask_inline, unmask_inline, visible_text
 
 
@@ -119,14 +120,22 @@ def build_user_prompt(seg: Segment, masked_source: str) -> str:
             "Required terminology (use these exact French targets):\n" + terms
         )
     if seg.tm_fuzzy:
-        refs = "\n".join(
-            f'- source: "{plain(s)}"\n  target: "{plain(t)}"  (similarity {score:.0%})'
-            for s, t, score in seg.tm_fuzzy[:2]
-        )
-        parts.append(
-            "Similar previously-approved translations (for consistency, adapt as needed):\n"
-            + refs
-        )
+        # Separate the two kinds of reference. Presenting unreviewed machine output as
+        # "previously approved" (as this once did) teaches the model to reproduce its own
+        # earlier mistakes as if they were house style.
+        by_origin: dict[str, list[str]] = {}
+        for s, t, score, origin in seg.tm_fuzzy[:2]:
+            by_origin.setdefault(origin, []).append(
+                f'- source: "{plain(s)}"\n  target: "{plain(t)}"  (similarity {score:.0%})'
+            )
+        for origin, heading in (
+            (APPROVED, "Approved translations of similar segments — a reviewer signed these "
+                       "off, so match their wording wherever it fits:"),
+            (MT, "Previous machine translations of similar segments (unreviewed — treat as a "
+                 "hint, not as authority):"),
+        ):
+            if by_origin.get(origin):
+                parts.append(heading + "\n" + "\n".join(by_origin[origin]))
     parts.append(
         "Translate this segment, keeping every ⟦N⟧ placeholder verbatim. "
         "Output only the translated segment:\n" + masked_source
@@ -276,12 +285,34 @@ def translate_segments(cfg: Config, segments: list[Segment], tm: TranslationMemo
         if not plain(seg.source_xml):
             seg.target_xml = seg.source_xml
             continue
-        exact = tm.exact(seg.source_xml)
-        if exact is not None:
-            seg.target_xml = exact
-            seg.tm_exact = exact
-            continue
-        seg.tm_fuzzy = tm.fuzzy(seg.source_xml, threshold)
+        hit = tm.exact(seg.source_xml)
+        if hit is not None:
+            target, origin = hit
+            # The stored target's inline codes came from whichever document version wrote
+            # it, and Word re-splits runs on almost any edit — so they may not fit this
+            # source. Reusing it regardless would trip the merge-safety guard in cli and
+            # ship the segment in English. Demote it to a top-ranked reference instead and
+            # let the LLM re-render the same French with the codes this source needs.
+            if codes_mergeable(seg.source_xml, target):
+                seg.target_xml = target
+                seg.tm_exact = target
+                seg.tm_origin = origin
+                seg.version_status = (
+                    UNCHANGED_APPROVED if origin == APPROVED else UNCHANGED_MT
+                )
+                continue
+            seg.tm_fuzzy = [(seg.source_xml, target, 1.0, origin)]
+            seg.previous_target = target
+            seg.qa_flags.append("tm_codes_incompatible")
+        else:
+            seg.tm_fuzzy = tm.fuzzy(seg.source_xml, threshold)
+            if seg.tm_fuzzy:
+                seg.previous_target = seg.tm_fuzzy[0][1]
+        # English that moved (or a segment we must re-render) reads as `changed`; the
+        # reviewer needs to look at it either way.
+        seg.version_status = CHANGED if seg.tm_fuzzy else NEW
+        if seg.tm_fuzzy:
+            seg.tm_origin = seg.tm_fuzzy[0][3]
         to_translate.append(seg)
 
     if to_translate:
@@ -300,3 +331,29 @@ def translate_segments(cfg: Config, segments: list[Segment], tm: TranslationMemo
         if not codes_mergeable(seg.source_xml, seg.target_xml):
             continue
         tm.upsert(seg.source_xml, seg.target_xml)
+
+
+def annotate_previous_sources(segments: list[Segment], previous_xliff: str | Path) -> int:
+    """Fill `previous_source` on changed segments from a previous job's source XLIFF.
+
+    Optional refinement for changes.html: the TM already tells us a segment moved, this
+    tells the reviewer *how the English moved*. Matching is on visible text, never on
+    trans-unit id — Okapi derives ids from document structure, so adding a single paragraph
+    renumbers everything after it and ids are not comparable across versions.
+    """
+    from .xliff import read_sources
+    previous = [p for p in (plain(s) for _, s in read_sources(previous_xliff)) if p]
+    filled = 0
+    for seg in segments:
+        if seg.version_status != CHANGED:
+            continue
+        q = plain(seg.source_xml)
+        best, score = None, 0.0
+        for p in previous:
+            r = SequenceMatcher(None, q, p).ratio()
+            if r > score:
+                best, score = p, r
+        if best is not None and score >= 0.6:
+            seg.previous_source = best
+            filled += 1
+    return filled

@@ -20,8 +20,8 @@ from pathlib import Path
 
 from . import okapi
 from .config import Config
-from .tm import TranslationMemory, plain
-from .xliff import read_sources, read_targets
+from .tm import APPROVED, TranslationMemory, plain
+from .xliff import read_sources, read_targets, visible_text
 
 REVIEW_INSTRUCTIONS = """# French review — instructions
 
@@ -31,6 +31,9 @@ anything that reads awkwardly.
 
 ## Files in this package
 - `*.fr-CA.draft.docx` — the French document. **Edit this if you review in Word.**
+- `changes.html` — **if this is a revision of a document you have already reviewed, start
+  here.** It lists only what is new or changed since last time; everything else reuses
+  wording you already approved, word for word.
 - `qa_report.html` — segments the system flagged, worst first (open in a browser).
   Start here: the lowest quality-estimate scores and flagged terms are most likely to need
   attention. Note: some "glossary" flags are false positives (correct conjugations).
@@ -42,6 +45,13 @@ anything that reads awkwardly.
   approved wording is reused and the machine French is leveraged.
 - `brand_glossary.tbx` — the terminology base (TBX). Import it as a glossary/termbase to keep
   brand terms consistent.
+
+## Revised documents — what changed since last time
+If you have reviewed an earlier version of this document, open `changes.html` first. Segments
+whose English did not change reuse your approved French **exactly** and need no attention. In
+`translated.xlf` they carry the state `signed-off`, so Smartcat, OmegaT and memoQ grey them out
+or lock them on import — you can filter to the segments still marked
+`needs-review-translation` and review only those.
 
 Pick **one** of the three review routes below.
 
@@ -89,7 +99,7 @@ def package(cfg: Config, job_dir: str | Path, out_zip: str | Path | None = None)
     fr = sorted(job_dir.glob("*.fr-CA.draft.docx"))
     if fr:
         included.append(fr[0])
-    for name in ("qa_report.html", "image_report.html", "translated.xlf"):
+    for name in ("qa_report.html", "changes.html", "image_report.html", "translated.xlf"):
         p = job_dir / name
         if p.exists():
             included.append(p)
@@ -143,7 +153,7 @@ def import_review(cfg: Config, reviewed: str | Path, job_dir: str | Path) -> tup
     updated = 0
     for en, fr in pairs:
         if plain(fr) and plain(fr) != plain(en):
-            tm.upsert(en, fr)
+            tm.upsert(en, fr, origin=APPROVED)
             updated += 1
     tm.export_tmx(cfg.tm["tmx_export"], cfg.language["source"], cfg.language["target"])
     tm.close()
@@ -190,6 +200,10 @@ def _align_docx(cfg: Config, reviewed: Path, job_dir: Path,
             if r > best:
                 best, best_uid = r, uid
         if best_uid is not None and best >= 0.6:
-            pairs.append((src_units[best_uid], fr))
+            # Store the reviewer's wording as visible text only. `fr` came from extracting
+            # the *French* document, so its inline codes describe that file's run structure
+            # and have nothing to do with the English source's code ids — keeping them
+            # would put an entry in the TM that can never merge against this source.
+            pairs.append((src_units[best_uid], visible_text(fr)))
             remaining = [(u, m) for u, m in remaining if u != best_uid]
     return pairs, len(reviewed_fr)

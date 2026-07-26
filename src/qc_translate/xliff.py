@@ -179,8 +179,15 @@ def read_targets(path: str | Path) -> dict[str, str]:
     return out
 
 
-def write_targets(path: str | Path, targets: dict[str, str], out_path: str | Path) -> None:
-    """Write a <target> (with inner XML) into each trans-unit and save to out_path."""
+def write_targets(path: str | Path, targets: dict[str, str], out_path: str | Path,
+                  states: dict[str, str] | None = None) -> None:
+    """Write a <target> (with inner XML) into each trans-unit and save to out_path.
+
+    `states` optionally maps a trans-unit id to an XLIFF 1.2 target state (see
+    models.STATE_BY_STATUS). A `signed-off` unit also gets `approved="yes"`, which is the
+    attribute CAT tools read to lock a segment against accidental editing.
+    """
+    states = states or {}
     parser = etree.XMLParser(remove_blank_text=False)
     tree = etree.parse(str(path), parser)
     root = tree.getroot()
@@ -191,21 +198,27 @@ def write_targets(path: str | Path, targets: dict[str, str], out_path: str | Pat
         # Remove any existing target, then build a new one from the string payload.
         for existing in tu.findall(f"{{{XLIFF_NS}}}target"):
             tu.remove(existing)
-        target_el = _build_target(targets[uid])
+        state = states.get(uid)
+        target_el = _build_target(targets[uid], state)
+        if state == "signed-off":
+            tu.set("approved", "yes")
         # Insert target right after source for a valid, tidy XLIFF.
         src = tu.find(f"{{{XLIFF_NS}}}source")
         src.addnext(target_el)
     tree.write(str(out_path), encoding="UTF-8", xml_declaration=True)
 
 
-def _build_target(inner_xml: str) -> etree._Element:
+def _build_target(inner_xml: str, state: str | None = None) -> etree._Element:
     """Parse an inner-XML target string into a <target> element in the XLIFF ns."""
-    wrapped = f'<target xmlns="{XLIFF_NS}">{inner_xml}</target>'
+    attr = f' state="{state}"' if state else ""
+    wrapped = f'<target xmlns="{XLIFF_NS}"{attr}>{inner_xml}</target>'
     try:
         return etree.fromstring(wrapped)
     except etree.XMLSyntaxError:
         # Model returned text that broke tag well-formedness; fall back to text-only
         # target so the merge still succeeds (QA will have flagged the tag mismatch).
         el = etree.Element(f"{{{XLIFF_NS}}}target")
+        if state:
+            el.set("state", state)
         el.text = re.sub(r"<[^>]+>", "", inner_xml)
         return el

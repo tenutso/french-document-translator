@@ -140,15 +140,154 @@ def test_qa_untranslated():
 def test_tm_exact_and_fuzzy(tmp_path: Path):
     tm = TranslationMemory(tmp_path / "tm.sqlite")
     tm.upsert("Open the file menu.", "Ouvrez le menu Fichier.")
-    assert tm.exact("Open the file menu.") == "Ouvrez le menu Fichier."
+    assert tm.exact("Open the file menu.") == ("Ouvrez le menu Fichier.", "mt")
     assert tm.exact("Something else.") is None
     fuzzy = tm.fuzzy("Open the file menus.", threshold=0.7)
     assert fuzzy and fuzzy[0][1] == "Ouvrez le menu Fichier."
+    assert fuzzy[0][3] == "mt"
     tm.close()
 
 
 def test_plain_strips_tags():
     assert plain('A <g id="1">bold</g> word.') == "A bold word."
+
+
+def test_tm_key_survives_word_run_resplitting():
+    """The revision case: Word re-splits runs on almost any edit.
+
+    Native codes carry their Word markup as *escaped content*, so a key built by merely
+    stripping tags kept `&lt;run1&gt;` — and Word renumbers those runs whenever a
+    paragraph is touched, so an approved translation stopped matching its own source in
+    the next version. Reproduced from NFDBB2FA9-tu59 of the AGM report.
+    """
+    v1 = ('Facilitating peer-based <bpt id="1">&lt;run1&gt;</bpt>Leader-to-Leader calls'
+          '<ept id="1">&lt;/run1&gt;</ept> for members.')
+    # Same visible sentence, but Word split "Leader-to-Leader" across two runs and
+    # renumbered, so every code id and every escaped run marker differs.
+    v2 = ('Facilitating peer-based <bpt id="1">&lt;run3&gt;</bpt>Leader-to-Leader'
+          '<ept id="1">&lt;/run3&gt;</ept><bpt id="2">&lt;run4&gt;</bpt> calls'
+          '<ept id="2">&lt;/run4&gt;</ept> for members.')
+    assert plain(v1) == plain(v2) == "Facilitating peer-based Leader-to-Leader calls for members."
+    assert "&lt;" not in plain(v1), "escaped Word markup must not leak into the key"
+
+
+def test_approved_tm_entry_is_not_clobbered_by_machine_output(tmp_path: Path):
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert("Our members matter.", "Nos membres comptent.", origin="approved")
+    tm.upsert("Our members matter.", "Nos membres importent.")          # machine retry
+    assert tm.exact("Our members matter.") == ("Nos membres comptent.", "approved")
+    # A fresh review still wins.
+    tm.upsert("Our members matter.", "Nos membres sont importants.", origin="approved")
+    assert tm.exact("Our members matter.")[0] == "Nos membres sont importants."
+    tm.close()
+
+
+def test_fuzzy_ranks_approved_ahead_of_machine(tmp_path: Path):
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert("Open the file menu now.", "Ouvrez le menu Fichier maintenant.")
+    tm.upsert("Open the file menu today.", "Ouvrez le menu Fichier aujourd'hui.",
+              origin="approved")
+    hits = tm.fuzzy("Open the file menu.", threshold=0.7)
+    assert hits[0][3] == "approved", "reviewer wording must be offered to the model first"
+    tm.close()
+
+
+def test_legacy_tm_is_rekeyed_and_gets_origin(tmp_path: Path):
+    """A pre-migration store is rekeyed in place on first open, once."""
+    import sqlite3
+    db = tmp_path / "legacy.sqlite"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE tm (src_plain TEXT PRIMARY KEY, src_xml TEXT NOT NULL, "
+                "tgt_xml TEXT NOT NULL, updated TEXT DEFAULT CURRENT_TIMESTAMP)")
+    src = '<bpt id="1">&lt;run1&gt;</bpt>Our members<ept id="1">&lt;/run1&gt;</ept> matter.'
+    con.execute("INSERT INTO tm VALUES (?,?,?,?)",
+                ("&lt;run1&gt;Our members&lt;/run1&gt; matter.", src,
+                 "Nos membres comptent.", "2026-01-01"))
+    con.commit(); con.close()
+
+    tm = TranslationMemory(db)
+    assert tm.exact(src) == ("Nos membres comptent.", "mt")
+    keys = [r[0] for r in tm.conn.execute("SELECT src_plain FROM tm")]
+    assert keys == ["Our members matter."]
+    tm.close()
+    # Idempotent: re-opening must not rekey again or lose the row.
+    tm2 = TranslationMemory(db)
+    assert [r[0] for r in tm2.conn.execute("SELECT src_plain FROM tm")] == ["Our members matter."]
+    tm2.close()
+
+
+# --- revision handling -------------------------------------------------------
+def _classify(tmp_path, monkeypatch, sources, seed=()):
+    """Run translate_segments with the LLM stubbed out; return the segments."""
+    from qc_translate import translate as tr
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    for src, tgt, origin in seed:
+        tm.upsert(src, tgt, origin=origin)
+    segs = [Segment(unit_id=f"u{i}", source_xml=s) for i, s in enumerate(sources)]
+    # Anything reaching the LLM just gets a marker target, so the assertions are about
+    # routing and classification, not translation quality.
+    monkeypatch.setattr(tr.VLLMClient, "translate",
+                        lambda self, segments, system: [setattr(s, "target_xml", "FR")
+                                                        for s in segments])
+    tr.translate_segments(CFG, segs, tm)
+    tm.close()
+    return segs
+
+
+def test_version_status_covers_every_case(tmp_path, monkeypatch):
+    approved = "Our members matter."
+    machine = "The board met in March."
+    changed = "Looking ahead, we will pursue prudent diversification of the portfolio."
+    changed_v2 = "Looking ahead, we will pursue prudent diversification of the portfolios."
+    segs = _classify(
+        tmp_path, monkeypatch,
+        [approved, machine, changed_v2, "An entirely unrelated new sentence appears."],
+        seed=[(approved, "Nos membres comptent.", "approved"),
+              (machine, "Le conseil s'est réuni en mars.", "mt"),
+              (changed, "En regardant vers l'avenir…", "mt")],
+    )
+    assert [s.version_status for s in segs] == [
+        "unchanged-approved", "unchanged-mt", "changed", "new"]
+    # An approved exact match is reused verbatim — it must never reach the LLM.
+    assert segs[0].target_xml == "Nos membres comptent."
+    assert segs[2].previous_target == "En regardant vers l'avenir…"
+
+
+def test_exact_hit_with_incompatible_codes_is_not_reused_verbatim(tmp_path, monkeypatch):
+    """The stored target's codes came from another version of the document.
+
+    Reusing it verbatim would trip the merge-safety guard in cli and ship the segment in
+    English; it must be demoted to a reference and re-rendered instead.
+    """
+    src = '<bpt id="1">&lt;run1&gt;</bpt>Our members<ept id="1">&lt;/run1&gt;</ept> matter.'
+    stored_plain_fr = "Nos membres comptent."          # no inline codes at all
+    segs = _classify(tmp_path, monkeypatch, [src],
+                     seed=[(src, stored_plain_fr, "approved")])
+    seg = segs[0]
+    assert seg.tm_exact is None, "must not be treated as a verbatim reuse"
+    assert "tm_codes_incompatible" in seg.qa_flags
+    assert seg.target_xml == "FR", "should have been re-translated"
+    assert seg.tm_fuzzy and seg.tm_fuzzy[0][1] == stored_plain_fr
+
+
+def test_write_targets_marks_signed_off_units(tmp_path: Path):
+    from qc_translate.xliff import write_targets
+    xlf = tmp_path / "in.xlf"
+    xlf.write_text(
+        '<?xml version="1.0"?><xliff version="1.2" '
+        'xmlns="urn:oasis:names:tc:xliff:document:1.2"><file source-language="en" '
+        'datatype="x-docx" original="d.docx"><body>'
+        '<trans-unit id="1"><source>Alpha</source></trans-unit>'
+        '<trans-unit id="2"><source>Beta</source></trans-unit>'
+        '</body></file></xliff>', encoding="utf-8")
+    out = tmp_path / "out.xlf"
+    write_targets(xlf, {"1": "Alpha FR", "2": "Beta FR"}, out,
+                  {"1": "signed-off", "2": "needs-review-translation"})
+    xml = out.read_text(encoding="utf-8")
+    assert 'state="signed-off"' in xml and 'approved="yes"' in xml
+    assert 'state="needs-review-translation"' in xml
+    # Only the settled unit is locked.
+    assert xml.count('approved="yes"') == 1
 
 
 # --- runpod env loading ------------------------------------------------------

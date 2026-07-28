@@ -100,17 +100,26 @@ qc-translate import-review reviewed.docx --job /workspace/jobs/manual
 - **New source version (v7, v8…):** just `qc-translate run new.docx` — the TM reuses every
   unchanged segment and only translates what changed.
 - **Durability without persistent storage:** the TM lives on the `/workspace` volume, so it's
-  gone if you don't pay for a persistent one. Keep the exported `qc_translate.tmx` (from
-  `package`/`export-tm`) with your client data, and on a fresh pod, before your next
-  `qc-translate run`, restore it with:
+  gone if you don't pay for a persistent one. `qc-translate package` already copies the raw
+  database next to the review zip as `qc_translate.sqlite` — pull that off the pod along
+  with the zip. On a fresh pod, before your next `qc-translate run`:
   ```bash
-  qc-translate import-tm qc_translate.tmx
+  qc-translate restore-tm qc_translate.sqlite
   ```
-  This reseeds the SQLite TM from the TMX. Segments with no inline formatting reuse
-  verbatim again immediately; segments with formatting (bold/italic runs, etc.) fall back
-  to a strong reference for the LLM rather than a blind reuse, same as any exact TM hit
-  whose inline codes don't fit the current document (see `translate.py`). Existing approved
-  entries are never downgraded by an import — importing on top of a non-empty TM is safe.
+  This is the **no-caveat** path: it's the exact same file, so every entry (including
+  inline formatting codes) is preserved and reuse behaves as if the pod had never gone
+  down. It refuses to overwrite an existing non-empty TM unless you pass `--force`. Take a
+  standalone snapshot anytime with `qc-translate backup-tm`.
+
+  A `qc_translate.tmx` also travels in every review zip and is refreshed by `export-tm`.
+  It's a portable, human-auditable fallback (and the thing you'd hand to another CAT
+  tool), but it's **lossy**: TMX only carries plain text, so restoring from it with
+  `qc-translate import-tm qc_translate.tmx` reseeds the TM but loses inline codes —
+  segments with no formatting reuse verbatim again immediately, while formatted segments
+  (bold/italic runs, etc.) fall back to a strong reference for the LLM instead of a blind
+  reuse, same as any exact TM hit whose codes don't fit the current document (see
+  `translate.py`). Prefer `backup-tm`/`restore-tm`; use `import-tm` only if the raw
+  database backup is missing or stale. Neither ever downgrades an existing approved entry.
 
 **OmegaT alternative:** open `omegat_project/` for segment-level review with the glossary + TM;
 run `merge` for the final `.docx`, then `import-review reviewed.xlf` to update the TM.

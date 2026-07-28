@@ -11,6 +11,7 @@ everywhere — they are never overwritten by MT, and they sort first as prompt r
 """
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -219,3 +220,31 @@ class TranslationMemory:
 
     def close(self) -> None:
         self.conn.close()
+
+
+def backup_db(db_path: str | Path, out_path: str | Path) -> Path:
+    """Copy the raw TM database file — the exact, no-caveat restore path for a pod
+    without persistent storage. Unlike `import_tmx`, the copy keeps every stored
+    target's inline codes, so a formatted segment can still be reused verbatim (not just
+    offered as a reference) after a restore, as long as `codes_mergeable` still holds.
+    """
+    db_path, out_path = Path(db_path), Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(db_path, out_path)
+    return out_path
+
+
+def restore_db(backup_path: str | Path, db_path: str | Path, force: bool = False) -> Path:
+    """Restore a TM database file backed up with `backup_db`.
+
+    Refuses to overwrite an existing non-empty TM unless `force`, since that would
+    silently discard whatever entries the current pod already has.
+    """
+    backup_path, db_path = Path(backup_path), Path(db_path)
+    if db_path.exists() and db_path.stat().st_size > 0 and not force:
+        raise FileExistsError(
+            f"{db_path} already exists and is non-empty; pass force=True to overwrite"
+        )
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(backup_path, db_path)
+    return db_path

@@ -5,7 +5,9 @@ Commands:
   merge         Merge a reviewed XLIFF back into the DOCX
   roundtrip     Extract + merge with NO translation (formatting-fidelity check)
   export-tm     Export the translation memory to TMX
-  import-tm     Reseed the translation memory from a TMX (disaster recovery)
+  import-tm     Reseed the translation memory from a TMX (disaster recovery, lossy)
+  backup-tm     Copy the raw TM database file (disaster recovery, no-caveat)
+  restore-tm    Restore a TM database file backed up with backup-tm
 """
 from __future__ import annotations
 
@@ -229,11 +231,16 @@ def package(
     """Zip the reviewer's files (French .docx + reports + instructions) and refresh the TMX."""
     from . import review
     cfg = load_config(config)
-    zip_path, files = review.package(cfg, job_dir, out)
+    zip_path, files, tm_backup = review.package(cfg, job_dir, out)
     console.print(f"[green]Review package →[/] {zip_path}")
     for f in files:
         console.print(f"    included: {f.name}")
     console.print("\nPull it off the pod, e.g.:  [bold]runpodctl send " + str(zip_path) + "[/]")
+    console.print(
+        f"\n[green]TM raw backup (operator-only, not for the reviewer) →[/] {tm_backup}\n"
+        "Pull this off too if the pod has no persistent storage — it's the no-caveat "
+        "restore path (see restore-tm), unlike the qc_translate.tmx inside the zip."
+    )
 
 
 @app.command("import-review")
@@ -284,6 +291,49 @@ def import_tm(
                        default_origin=default_origin)
     tm.close()
     console.print(f"[green]Imported {n} TM entr{'y' if n == 1 else 'ies'} from[/] {tmx}")
+
+
+@app.command("backup-tm")
+def backup_tm(
+    out: Path = typer.Option(None, "--out", "-o",
+                             help="Destination file (default: ./qc_translate.sqlite)"),
+    config: Path = typer.Option(None, "--config", "-c"),
+):
+    """Copy the raw TM database file.
+
+    The exact, no-caveat restore path for a pod without persistent storage: unlike
+    import-tm (from a TMX), the raw file keeps every stored target's inline codes, so a
+    formatted segment can be reused verbatim after a restore, not just offered as a
+    reference. `qc-translate package` already does this automatically next to the review
+    zip — use this command directly if you want a snapshot outside of packaging a job.
+    """
+    from .tm import backup_db
+    cfg = load_config(config)
+    dest = out or Path.cwd() / "qc_translate.sqlite"
+    result = backup_db(cfg.tm["db"], dest)
+    console.print(f"[green]TM backup →[/] {result}")
+    console.print("Pull it off the pod, e.g.:  [bold]runpodctl send " + str(result) + "[/]")
+
+
+@app.command("restore-tm")
+def restore_tm(
+    backup: Path = typer.Argument(..., exists=True, help="A file produced by backup-tm"),
+    config: Path = typer.Option(None, "--config", "-c"),
+    force: bool = typer.Option(False, help="Overwrite an existing non-empty TM"),
+):
+    """Restore a TM database file backed up with backup-tm.
+
+    Run this on a fresh pod, before your first `qc-translate run`, for full-fidelity TM
+    continuity — no LLM re-render fallback for formatted segments, unlike import-tm.
+    Refuses to overwrite an existing non-empty TM unless --force.
+    """
+    from .tm import restore_db
+    cfg = load_config(config)
+    try:
+        result = restore_db(backup, cfg.tm["db"], force=force)
+    except FileExistsError as e:
+        raise typer.BadParameter(str(e))
+    console.print(f"[green]TM restored →[/] {result}")
 
 
 if __name__ == "__main__":

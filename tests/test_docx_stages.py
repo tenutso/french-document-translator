@@ -103,7 +103,7 @@ def test_package_builds_zip(tmp_path: Path):
     Document().save(str(job / "sample.fr-CA.draft.docx"))
     (job / "qa_report.html").write_text("<html>qa</html>")
     cfg = _tmp_cfg(tmp_path)
-    zip_path, files = package(cfg, job)
+    zip_path, files, tm_backup = package(cfg, job)
     names = zipfile.ZipFile(zip_path).namelist()
     assert "REVIEW_INSTRUCTIONS.md" in names
     assert "sample.fr-CA.draft.docx" in names and "qa_report.html" in names
@@ -111,6 +111,11 @@ def test_package_builds_zip(tmp_path: Path):
     # reviewer can import them into Smartcat / OmegaT.
     assert "qc_translate.tmx" in names
     assert "brand_glossary.tbx" in names
+    # The raw TM database is an operator artifact, not a reviewer one: it sits beside the
+    # zip, never inside it.
+    assert tm_backup == job / "qc_translate.sqlite"
+    assert tm_backup.exists()
+    assert tm_backup.name not in names
 
 
 def test_finalize_docx_sets_language_and_fields(tmp_path: Path):

@@ -2,11 +2,13 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from qc_translate.config import load_config
 from qc_translate.models import Segment
 from qc_translate.qa import check_segment
 from qc_translate.segment_glossary import Glossary
-from qc_translate.tm import TranslationMemory, plain
+from qc_translate.tm import TranslationMemory, backup_db, plain, restore_db
 from qc_translate.xliff import (codes_match, inline_code_ids, mask_inline,
                                 unmask_inline, visible_text)
 
@@ -239,6 +241,47 @@ def test_import_tmx_without_origin_prop_uses_default_origin(tmp_path: Path):
     assert n == 1
     assert tm.exact("Hello.") == ("Bonjour.", "approved")
     tm.close()
+
+
+def test_backup_and_restore_db_preserves_inline_codes(tmp_path: Path):
+    """The raw-file backup is the no-caveat path: unlike a TMX round-trip, restoring it
+    keeps inline codes, so a formatted segment can still be reused verbatim."""
+    coded_src = 'Click <bpt id="1">&lt;b&gt;</bpt>Save<ept id="1">&lt;/b&gt;</ept> now.'
+    coded_tgt = 'Cliquez sur <bpt id="1">&lt;b&gt;</bpt>Enregistrer<ept id="1">&lt;/ept&gt;</ept> maintenant.'
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert(coded_src, coded_tgt, origin="approved")
+    tm.close()
+
+    backup = backup_db(tmp_path / "tm.sqlite", tmp_path / "backup" / "tm_backup.sqlite")
+    assert backup.exists()
+
+    restored = restore_db(backup, tmp_path / "restored" / "tm.sqlite")
+    tm2 = TranslationMemory(restored)
+    hit = tm2.exact(coded_src)
+    assert hit is not None
+    assert hit == (coded_tgt, "approved")
+    assert '<bpt id="1">' in hit[0], "restore must keep inline codes, unlike a TMX import"
+    tm2.close()
+
+
+def test_restore_db_refuses_to_clobber_nonempty_tm_without_force(tmp_path: Path):
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert("Hello.", "Bonjour.")
+    tm.close()
+    backup = backup_db(tmp_path / "tm.sqlite", tmp_path / "backup.sqlite")
+
+    live = TranslationMemory(tmp_path / "live.sqlite")
+    live.upsert("Something else.", "Autre chose.")
+    live.close()
+
+    with pytest.raises(FileExistsError):
+        restore_db(backup, tmp_path / "live.sqlite")
+
+    restore_db(backup, tmp_path / "live.sqlite", force=True)
+    tm3 = TranslationMemory(tmp_path / "live.sqlite")
+    assert tm3.exact("Hello.") == ("Bonjour.", "mt")
+    assert tm3.exact("Something else.") is None, "force must overwrite, not merge"
+    tm3.close()
 
 
 def test_legacy_tm_is_rekeyed_and_gets_origin(tmp_path: Path):

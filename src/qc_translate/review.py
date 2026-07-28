@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import okapi
 from .config import Config
-from .tm import APPROVED, TranslationMemory, plain
+from .tm import APPROVED, TranslationMemory, backup_db, plain
 from .xliff import read_sources, read_targets, visible_text
 
 REVIEW_INSTRUCTIONS = """# French review — instructions
@@ -92,8 +92,12 @@ change the document's structure (don't add/remove paragraphs) so corrections ali
 """
 
 
-def package(cfg: Config, job_dir: str | Path, out_zip: str | Path | None = None) -> tuple[Path, list[Path]]:
-    """Zip the reviewer-facing deliverables + instructions, and refresh the TMX export."""
+def package(cfg: Config, job_dir: str | Path,
+            out_zip: str | Path | None = None) -> tuple[Path, list[Path], Path]:
+    """Zip the reviewer-facing deliverables + instructions, and refresh the TMX export.
+
+    Returns (zip_path, files_in_zip, tm_backup_path).
+    """
     job_dir = Path(job_dir)
     included: list[Path] = []
     fr = sorted(job_dir.glob("*.fr-CA.draft.docx"))
@@ -112,6 +116,14 @@ def package(cfg: Config, job_dir: str | Path, out_zip: str | Path | None = None)
     tm = TranslationMemory(cfg.tm["db"])
     tmx = tm.export_tmx(cfg.tm["tmx_export"], cfg.language["source"], cfg.language["target"])
     tm.close()
+
+    # Raw TM database snapshot — an operator artifact, not a reviewer one, so it sits
+    # beside the zip rather than inside it. Unlike the TMX above, it keeps every stored
+    # target's inline codes, so restoring it (tm.restore_db) gives full-fidelity TM
+    # continuity with no formatting-code caveat. Placed here so pulling the review
+    # package off the pod (which you're already doing) also pulls this along.
+    tm_backup = backup_db(cfg.tm["db"], job_dir / "qc_translate.sqlite")
+
     extras: list[tuple[Path, str]] = []   # (source path, name inside the zip)
     if tmx.exists():
         extras.append((tmx, "qc_translate.tmx"))
@@ -126,7 +138,7 @@ def package(cfg: Config, job_dir: str | Path, out_zip: str | Path | None = None)
         for src, arcname in extras:
             z.write(src, arcname)
         z.writestr("REVIEW_INSTRUCTIONS.md", REVIEW_INSTRUCTIONS)
-    return out_zip, included + [src for src, _ in extras]
+    return out_zip, included + [src for src, _ in extras], tm_backup
 
 
 def import_review(cfg: Config, reviewed: str | Path, job_dir: str | Path) -> tuple[int, int]:

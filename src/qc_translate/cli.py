@@ -5,6 +5,7 @@ Commands:
   merge         Merge a reviewed XLIFF back into the DOCX
   roundtrip     Extract + merge with NO translation (formatting-fidelity check)
   export-tm     Export the translation memory to TMX
+  import-tm     Reseed the translation memory from a TMX (disaster recovery)
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from . import okapi, report
 from .config import load_config
 from .models import Segment
 from .segment_glossary import Glossary
-from .tm import TranslationMemory
+from .tm import APPROVED, MT, TranslationMemory
 
 app = typer.Typer(add_completion=False, help="EN -> Quebec French DOCX translation pipeline")
 console = Console()
@@ -257,6 +258,32 @@ def export_tm(config: Path = typer.Option(None, "--config", "-c")):
     out = tm.export_tmx(cfg.tm["tmx_export"], cfg.language["source"], cfg.language["target"])
     tm.close()
     console.print(f"[green]TMX →[/] {out}")
+
+
+@app.command("import-tm")
+def import_tm(
+    tmx: Path = typer.Argument(..., exists=True, help="TMX file to reseed the TM from"),
+    config: Path = typer.Option(None, "--config", "-c"),
+    default_origin: str = typer.Option(
+        "mt", "--default-origin",
+        help="Origin for entries whose TMX has no x-origin prop (approved|mt); "
+             "ignored for our own exports, which already carry it"),
+):
+    """Reseed the translation memory from a TMX export.
+
+    For a pod without persistent storage: back up the `qc_translate.tmx` this pipeline
+    exports (every `run`/`export-tm`/`package` refreshes it) and, on a fresh pod, run this
+    before your next `qc-translate run` to restore TM reuse. Existing approved entries are
+    never downgraded by an import.
+    """
+    if default_origin not in (APPROVED, MT):
+        raise typer.BadParameter("--default-origin must be 'approved' or 'mt'")
+    cfg = load_config(config)
+    tm = TranslationMemory(cfg.tm["db"])
+    n = tm.import_tmx(tmx, cfg.language["source"], cfg.language["target"],
+                       default_origin=default_origin)
+    tm.close()
+    console.print(f"[green]Imported {n} TM entr{'y' if n == 1 else 'ies'} from[/] {tmx}")
 
 
 if __name__ == "__main__":

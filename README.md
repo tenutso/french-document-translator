@@ -99,9 +99,18 @@ qc-translate import-review reviewed.docx --job /workspace/jobs/manual
   the OmegaT/CAT route). Only changed segments update the TM.
 - **New source version (v7, v8…):** just `qc-translate run new.docx` — the TM reuses every
   unchanged segment and only translates what changed.
-- **Durability:** the TM lives on the `/workspace` volume. Keep the exported `qc_translate.tmx`
-  (from `package`/`export-tm`) with your client data so the memory survives if the volume is
-  ever deleted.
+- **Durability without persistent storage:** the TM lives on the `/workspace` volume, so it's
+  gone if you don't pay for a persistent one. Keep the exported `qc_translate.tmx` (from
+  `package`/`export-tm`) with your client data, and on a fresh pod, before your next
+  `qc-translate run`, restore it with:
+  ```bash
+  qc-translate import-tm qc_translate.tmx
+  ```
+  This reseeds the SQLite TM from the TMX. Segments with no inline formatting reuse
+  verbatim again immediately; segments with formatting (bold/italic runs, etc.) fall back
+  to a strong reference for the LLM rather than a blind reuse, same as any exact TM hit
+  whose inline codes don't fit the current document (see `translate.py`). Existing approved
+  entries are never downgraded by an import — importing on top of a non-empty TM is safe.
 
 **OmegaT alternative:** open `omegat_project/` for segment-level review with the glossary + TM;
 run `merge` for the final `.docx`, then `import-review reviewed.xlf` to update the TM.

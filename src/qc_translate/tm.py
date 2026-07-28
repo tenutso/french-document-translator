@@ -15,10 +15,13 @@ import sqlite3
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from lxml import etree
+
 from .xliff import visible_text
 
 APPROVED = "approved"
 MT = "mt"
+_XML_NS = "http://www.w3.org/XML/1998/namespace"
 
 # Bump when the on-disk layout changes; _ensure_schema migrates once, gated on this.
 _SCHEMA_VERSION = 1
@@ -157,12 +160,17 @@ class TranslationMemory:
             self._keys.append(key)
 
     def export_tmx(self, tmx_path: str | Path, src_lang: str, tgt_lang: str) -> Path:
+        """Export every entry as TMX. Each <tu> carries an `x-origin` prop (our own
+        extension, ignored by other CAT tools) so `import_tmx` can round-trip the
+        approved/mt distinction — without it, a restored TM would treat every entry as
+        equally trustworthy and could let raw machine output masquerade as reviewed."""
         from xml.sax.saxutils import escape
-        rows = self.conn.execute("SELECT src_xml, tgt_xml FROM tm").fetchall()
+        rows = self.conn.execute("SELECT src_xml, tgt_xml, origin FROM tm").fetchall()
         tus = []
-        for src, tgt in rows:
+        for src, tgt, origin in rows:
             tus.append(
-                f'  <tu><tuv xml:lang="{src_lang}"><seg>{escape(plain(src))}</seg></tuv>'
+                f'  <tu><prop type="x-origin">{escape(origin)}</prop>'
+                f'<tuv xml:lang="{src_lang}"><seg>{escape(plain(src))}</seg></tuv>'
                 f'<tuv xml:lang="{tgt_lang}"><seg>{escape(plain(tgt))}</seg></tuv></tu>'
             )
         body = "\n".join(tus)
@@ -176,6 +184,38 @@ class TranslationMemory:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(tmx, encoding="utf-8")
         return out
+
+    def import_tmx(self, tmx_path: str | Path, src_lang: str, tgt_lang: str,
+                    default_origin: str = MT) -> int:
+        """Reseed the TM from a TMX export — the disaster-recovery path for a TM whose
+        SQLite file was lost (e.g. an ephemeral pod/volume). Matches `<tuv>` by
+        `xml:lang` against `src_lang`/`tgt_lang` (falling back to tu order for a TMX from
+        elsewhere that doesn't share these codes). Entries are keyed on plain text, same
+        as everywhere else in this module — a TMX round-trip never had inline codes to
+        begin with, so imported entries reuse verbatim only for segments with no
+        formatting; anything else demotes to a fuzzy reference in `translate_segments`,
+        which is exactly the existing behaviour for a stale-codes exact hit.
+
+        Only upserts entries that outrank what's already there (approved beats mt), so
+        importing on top of a non-empty TM never downgrades existing approved wording.
+        Returns the number of entries imported.
+        """
+        tree = etree.parse(str(tmx_path))
+        n = 0
+        for tu in tree.iterfind(".//tu"):
+            prop = tu.find('prop[@type="x-origin"]')
+            origin = prop.text if prop is not None and prop.text in (APPROVED, MT) else default_origin
+            tuvs = tu.findall("tuv")
+            if len(tuvs) < 2:
+                continue
+            src_tuv = next((t for t in tuvs if t.get(f"{{{_XML_NS}}}lang") == src_lang), tuvs[0])
+            tgt_tuv = next((t for t in tuvs if t.get(f"{{{_XML_NS}}}lang") == tgt_lang), tuvs[1])
+            src_seg, tgt_seg = src_tuv.find("seg"), tgt_tuv.find("seg")
+            if src_seg is None or tgt_seg is None or not (src_seg.text and tgt_seg.text):
+                continue
+            self.upsert(src_seg.text, tgt_seg.text, origin=origin)
+            n += 1
+        return n
 
     def close(self) -> None:
         self.conn.close()

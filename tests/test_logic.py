@@ -192,6 +192,55 @@ def test_fuzzy_ranks_approved_ahead_of_machine(tmp_path: Path):
     tm.close()
 
 
+def test_tmx_round_trip_preserves_origin(tmp_path: Path):
+    """Disaster-recovery path: export, reseed a fresh TM, and origin must survive so an
+    approved entry can't be silently downgraded to indistinguishable-from-MT."""
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert("Our members matter.", "Nos membres comptent.", origin="approved")
+    tm.upsert("Open the file menu.", "Ouvrez le menu Fichier.")   # mt
+    tmx = tm.export_tmx(tmp_path / "export.tmx", "en", "fr-CA")
+    tm.close()
+
+    fresh = TranslationMemory(tmp_path / "restored.sqlite")
+    n = fresh.import_tmx(tmx, "en", "fr-CA")
+    assert n == 2
+    assert fresh.exact("Our members matter.") == ("Nos membres comptent.", "approved")
+    assert fresh.exact("Open the file menu.") == ("Ouvrez le menu Fichier.", "mt")
+    fresh.close()
+
+
+def test_import_tmx_never_downgrades_existing_approved_entry(tmp_path: Path):
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    tm.upsert("Our members matter.", "Nos membres comptent.")   # mt only, no approval yet
+    tmx = tm.export_tmx(tmp_path / "export.tmx", "en", "fr-CA")
+    tm.close()
+
+    # A newer pod approved a different wording after the export was taken.
+    live = TranslationMemory(tmp_path / "live.sqlite")
+    live.upsert("Our members matter.", "Nos membres sont importants.", origin="approved")
+    live.import_tmx(tmx, "en", "fr-CA")
+    assert live.exact("Our members matter.") == ("Nos membres sont importants.", "approved")
+    live.close()
+
+
+def test_import_tmx_without_origin_prop_uses_default_origin(tmp_path: Path):
+    """A TMX from elsewhere (or hand-edited) has no x-origin prop; default_origin governs."""
+    tmx = tmp_path / "plain.tmx"
+    tmx.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<tmx version="1.4"><header creationtool="other" segtype="sentence" '
+        'o-tmf="x" adminlang="en" srclang="en" datatype="plaintext"/>\n<body>\n'
+        '  <tu><tuv xml:lang="en"><seg>Hello.</seg></tuv>'
+        '<tuv xml:lang="fr-CA"><seg>Bonjour.</seg></tuv></tu>\n'
+        '</body></tmx>\n', encoding="utf-8",
+    )
+    tm = TranslationMemory(tmp_path / "tm.sqlite")
+    n = tm.import_tmx(tmx, "en", "fr-CA", default_origin="approved")
+    assert n == 1
+    assert tm.exact("Hello.") == ("Bonjour.", "approved")
+    tm.close()
+
+
 def test_legacy_tm_is_rekeyed_and_gets_origin(tmp_path: Path):
     """A pre-migration store is rekeyed in place on first open, once."""
     import sqlite3

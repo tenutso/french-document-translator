@@ -14,7 +14,7 @@ paths:
 # --- Translation LLM served by vLLM (OpenAI-compatible) ------------------------
 llm:
   # Active profile name (see profiles below). Switch this one line to change GPU tier.
-  profile: l4
+  profile: a100
 
   base_url: http://127.0.0.1:8000/v1
   api_key: EMPTY                             # vLLM ignores it; must be non-empty
@@ -41,7 +41,7 @@ profiles:
   a100:
     model: Unbabel/Tower-Plus-72B
     dtype: bfloat16
-    quantization: null                       # or "awq"/"fp8" on 48GB cards
+    quantization: fp8                       # or "awq"/"fp8" on 48GB cards
     gpu_memory_utilization: 0.92
     max_model_len: 16384
     tensor_parallel_size: 1

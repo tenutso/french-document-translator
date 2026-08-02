@@ -53,12 +53,24 @@ class Glossary:
         return cls(entries, dnt)
 
     def match(self, source_xml: str) -> dict[str, str]:
-        """Return {source_term: required_target} for terms present in the segment."""
+        """Return {source_term: required_target} for terms present in the segment.
+
+        Terms are tried longest-source-first (see __init__); a shorter term whose match
+        falls entirely inside an already-claimed span is skipped, so e.g. "CAPS Convention"
+        doesn't also fire standalone "CAPS" and "Convention" hits for the same words.
+        """
         text = plain(source_xml)
         hits: dict[str, str] = {}
+        claimed: list[tuple[int, int]] = []
         for pattern, src, tgt in self._compiled:
-            if pattern.search(text):
-                hits[src] = tgt
+            m = pattern.search(text)
+            if not m:
+                continue
+            start, end = m.span()
+            if any(start >= cs and end <= ce for cs, ce in claimed):
+                continue
+            hits[src] = tgt
+            claimed.append((start, end))
         return hits
 
     def annotate(self, segments: list[Segment]) -> None:

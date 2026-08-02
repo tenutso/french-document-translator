@@ -36,12 +36,25 @@ def _degenerate(src_plain: str, tgt_plain: str) -> bool:
 
 
 _PH_NUM = re.compile(r"⟦\s*(\d+)\s*⟧")
+_PH_ANY = re.compile(r"⟦[^⟧]*⟧")
 # An <it> is an *isolated* code whose open/close role lives in pos=, not the tag name.
 _OPENING = re.compile(r'<(bpt|g|bx)\b|<it\b[^>]*\bpos\s*=\s*"open"')
 
 
 def _placeholders_present(text: str) -> set[int]:
     return {int(x) for x in _PH_NUM.findall(text)}
+
+
+def _strip_bogus_placeholders(text: str) -> str:
+    """Drop any ⟦...⟧-bracketed token that isn't a real numeric placeholder id.
+
+    Tower+ occasionally hallucinates a bracket token that mimics the ⟦N⟧ syntax described
+    in the system prompt (e.g. "Stress" -> "Stress ⟦N1⟧") even in segments with zero inline
+    codes. Since validation only ever checks numeric ids, a non-numeric token like this was
+    invisible to is_good()/_degenerate() and shipped straight into the delivered docx.
+    """
+    stripped = _PH_ANY.sub(lambda m: m.group() if _PH_NUM.fullmatch(m.group()) else "", text)
+    return re.sub(r" {2,}", " ", stripped).strip()
 
 
 def _anchor_pos(content: str, n: int, *, end: bool) -> int | None:
@@ -82,6 +95,19 @@ def _repair_placeholders(content: str, codes: list[str]) -> str:
         content = content[:at] + f"⟦{i}⟧" + content[at:]
         present.add(i)
     return content
+
+
+def _normalize_guillemet_spacing(text: str) -> str:
+    """Upgrade a regular space touching « » to a non-breaking space (style guide rule).
+
+    Confirmed against a real 5500-segment run: Tower+ never once produced the required
+    U+00A0 on its own (0/34 sampled instances), always using a plain space instead — an
+    LLM tokenization habit, not a one-off. This is a deterministic, context-free
+    punctuation fix, so it's cheaper and more reliable to enforce here than to keep
+    hoping the model reproduces an invisible character correctly.
+    """
+    text = re.sub(r"«\x20", "« ", text)
+    return re.sub(r"\x20»", " »", text)
 
 
 def _is_allcaps(text: str) -> bool:
@@ -203,6 +229,7 @@ class VLLMClient:
                 seg.target_xml = seg.source_xml
                 seg.qa_flags.append("translation_failed")
                 return
+            content = _strip_bogus_placeholders(content)
 
             # If placeholders were dropped or the model echoed the prompt, retry once with
             # a minimal prompt (translation models misbehave less without the long system).
@@ -212,6 +239,8 @@ class VLLMClient:
                         tgt=self.cfg.language["target"])},
                     {"role": "user", "content": send_source},
                 ], 0.0)
+                if retry is not None:
+                    retry = _strip_bogus_placeholders(retry)
                 if retry is not None and (
                     is_good(retry)
                     # or retry at least preserves all placeholders and the primary didn't
@@ -236,7 +265,7 @@ class VLLMClient:
                 seg.target_xml = seg.source_xml   # last resort: valid merge over French-ish
                 seg.qa_flags.append("tag_mismatch")
                 return
-            seg.target_xml = target
+            seg.target_xml = _normalize_guillemet_spacing(target)
 
     async def _run(self, segments: list[Segment], system: str) -> None:
         base = self.llm["base_url"]
@@ -269,7 +298,8 @@ def translate_text(cfg: Config, text: str) -> str:
         r = httpx.post(cfg.llm["base_url"] + "/chat/completions", json=payload,
                        headers=headers, timeout=cfg.llm.get("request_timeout_s", 180))
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
+        out = r.json()["choices"][0]["message"]["content"].strip()
+        return _normalize_guillemet_spacing(_strip_bogus_placeholders(out))
     except (httpx.HTTPError, KeyError):
         return "(translation unavailable)"
 

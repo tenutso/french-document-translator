@@ -8,9 +8,12 @@
   <body>
     <languagerules>
       <languagerule languagerulename="English">
-        <!-- Do NOT break after common abbreviations / titles / initials. -->
+        <!-- Do NOT break after common abbreviations / titles / initials.
+             Includes Quebec French abbreviations too: this SRX is applied unconditionally
+             regardless of source/target language (e.g. re-segmenting a reviewed French
+             docx during import-review's alignment path uses the same rule set). -->
         <rule break="no">
-          <beforebreak>\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|Co|Corp|vs|etc|e\.g|i\.e|Fig|No|Vol|pp|St|Ave)\.</beforebreak>
+          <beforebreak>\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|Co|Corp|vs|etc|e\.g|i\.e|Fig|No|Vol|pp|St|Ave|M|Mme|Mlle|Dre|c\.-à-d|p\. ex|art|av|ch|éd|vol)\.</beforebreak>
           <afterbreak>\s</afterbreak>
         </rule>
         <!-- Do not break inside numbered/lettered lists like "1." or "a." -->

@@ -43,7 +43,13 @@ def check_segment(seg: Segment, cfg: Config) -> None:
     if cfg.glossary.get("enforce", True):
         low = plain(tgt).lower()
         for src_term, tgt_term in seg.glossary_hits.items():
-            if tgt_term.lower() not in low:
+            # plain(tgt) collapses whitespace runs (e.g. a non-breaking space inside
+            # French guillemets) to a single regular space; tgt_term comes straight from
+            # the TBX and isn't collapsed. Without normalizing both sides the same way,
+            # any glossary target containing a non-breaking space (e.g. "Parcours «
+            # Démarrage d'entreprise »") false-flags every correct translation.
+            tgt_term_norm = re.sub(r"\s+", " ", tgt_term).lower()
+            if tgt_term_norm not in low:
                 seg.qa_flags.append(f"glossary_miss:{src_term}->{tgt_term}")
 
     # 5. Length anomaly (FR is ~15-20% longer than EN; flag extremes).
@@ -69,12 +75,19 @@ def run_quality_estimation(cfg: Config, segments: list[Segment]) -> None:
             seg.qa_flags.append("qe_unavailable")
         return
 
-    model_path = download_model(qe["model"])
-    model = load_from_checkpoint(model_path)
-    data = [{"src": plain(s.source_xml), "mt": plain(s.target_xml or "")} for s in segments]
-    scores = model.predict(
-        data, batch_size=qe.get("batch_size", 16), gpus=1, progress_bar=False
-    )["scores"]
+    # Best-effort like the import above: a download hiccup or GPU/model-load failure here
+    # shouldn't crash a `run` that already produced a valid translation, merge, and reports.
+    try:
+        model_path = download_model(qe["model"])
+        model = load_from_checkpoint(model_path)
+        data = [{"src": plain(s.source_xml), "mt": plain(s.target_xml or "")} for s in segments]
+        scores = model.predict(
+            data, batch_size=qe.get("batch_size", 16), gpus=1, progress_bar=False
+        )["scores"]
+    except Exception:
+        for seg in segments:
+            seg.qa_flags.append("qe_unavailable")
+        return
 
     flag_below = qe.get("flag_below", 0.75)
     for seg, score in zip(segments, scores):

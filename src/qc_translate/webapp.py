@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -121,7 +122,9 @@ async def create_job(file: UploadFile = File(...)):
         raise HTTPException(400, "Please upload a .docx file")
     if not ENV_FILE.exists():
         raise HTTPException(500, "Run bootstrap.sh first (.env.runtime missing)")
-    jid = time.strftime("%Y%m%d-%H%M%S")
+    # Timestamp alone only has 1s resolution: two uploads in the same second would
+    # collide on the same job dir and corrupt each other's state/log.
+    jid = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     jd = JOBS / jid
     jd.mkdir(parents=True, exist_ok=True)
     upload = jd / ("input_" + _safe_name(file.filename))

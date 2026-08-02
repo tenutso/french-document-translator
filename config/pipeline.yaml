@@ -14,12 +14,12 @@ paths:
 # --- Translation LLM served by vLLM (OpenAI-compatible) ------------------------
 llm:
   # Active profile name (see profiles below). Switch this one line to change GPU tier.
-  profile: a100
+  profile: a6000
 
   base_url: http://127.0.0.1:8000/v1
   api_key: EMPTY                             # vLLM ignores it; must be non-empty
   request_timeout_s: 180
-  max_concurrency: 8                         # in-flight requests to vLLM
+  max_concurrency: 16                        # in-flight requests to vLLM
   max_retries: 4
   temperature: 0.1                           # near-deterministic for translation
   top_p: 0.9
@@ -44,6 +44,23 @@ profiles:
     quantization: fp8                       # or "awq"/"fp8" on 48GB cards
     gpu_memory_utilization: 0.92
     max_model_len: 16384
+    tensor_parallel_size: 1
+  a6000:
+    # 48GB Ampere (RTX A6000/A40/L40-class without native FP8 tensor cores — that's
+    # Ada/Hopper only). Tower+ 72B needs ~145GB just to download the bf16 checkpoint
+    # (quantization happens after download, doesn't shrink it), so it doesn't fit this
+    # tier at all. Reuse the README-verified Tower+ 9B, but skip FP8 (no Ampere native
+    # support, and we don't need the memory savings) and spend the A6000's extra ~25GB
+    # of headroom over the 23GB L4 on KV cache: more concurrent requests, not more
+    # context — Tower-Plus-9B (Gemma2 architecture) has a hard native max_position_
+    # embeddings of 8192; vLLM refuses to start above that (validated live: 16384
+    # raised a pydantic ValidationError at engine startup, VLLM_ALLOW_LONG_MAX_MODEL_LEN
+    # is not safe for a RoPE-adjacent model like this one).
+    model: Unbabel/Tower-Plus-9B
+    dtype: bfloat16
+    quantization: null
+    gpu_memory_utilization: 0.90
+    max_model_len: 8192
     tensor_parallel_size: 1
 
 # --- Language / register -------------------------------------------------------

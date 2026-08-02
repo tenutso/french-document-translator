@@ -16,6 +16,10 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "python-multipart>=0.0.9",
+    # RunPod pod images commonly set HF_HUB_ENABLE_HF_TRANSFER=1; without this package
+    # installed, huggingface_hub raises instead of silently falling back, breaking every
+    # model download (weight prefetch and lazy download alike).
+    "hf_transfer>=0.1",
 ]
 
 [project.optional-dependencies]

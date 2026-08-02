@@ -3,11 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jinja2 import Template
+from jinja2 import Environment
+from markupsafe import Markup, escape
 
 from .models import (CHANGED, NEW, UNCHANGED_APPROVED, UNCHANGED_MT, ImageInfo,
                      Segment)
 from .tm import plain
+
+# Reports render document-derived text (including OCR output) that a reviewer opens
+# straight in a browser, so autoescape everything by default.
+_ENV = Environment(autoescape=True)
 
 # Order and French labels for the revision report / QA status column.
 _STATUS_LABELS = (
@@ -17,7 +22,7 @@ _STATUS_LABELS = (
     (UNCHANGED_APPROVED, "inchangés (approuvés)"),
 )
 
-_QA_TMPL = Template(
+_QA_TMPL = _ENV.from_string(
     """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Rapport QA — {{ job }}</title>
 <style>
@@ -49,7 +54,7 @@ _QA_TMPL = Template(
  <td>{{ s.tgt }}</td>
  <td>{{ s.status }}</td>
  <td>{{ '%.2f'|format(s.qe_score) if s.qe_score is not none else '—' }}</td>
- <td class="flag">{{ s.flags|join('<br>')|safe }}</td>
+ <td class="flag">{{ s.flags }}</td>
 </tr>
 {% endfor %}
 </tbody></table>
@@ -57,7 +62,7 @@ _QA_TMPL = Template(
 </body></html>"""
 )
 
-_CHANGES_TMPL = Template(
+_CHANGES_TMPL = _ENV.from_string(
     """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Changements — {{ job }}</title>
 <style>
@@ -110,7 +115,7 @@ segments <b>nouveaux</b> et <b>modifiés</b> ci-dessous.</p>
 </body></html>"""
 )
 
-_IMG_TMPL = Template(
+_IMG_TMPL = _ENV.from_string(
     """<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <title>Rapport images — {{ job }}</title>
 <style>
@@ -148,7 +153,11 @@ def write_qa_report(path: str | Path, job: str, segments: list[Segment],
     labels = dict(_STATUS_LABELS)
     rows = [{
         "unit_id": s.unit_id, "src": plain(s.source_xml), "tgt": plain(s.target_xml or ""),
-        "qe_score": s.qe_score, "flags": s.qa_flags,
+        "qe_score": s.qe_score,
+        # Escape each flag individually, then join with a literal (unescaped) <br> so the
+        # deliberate line breaks survive autoescaping without exposing glossary-term text
+        # embedded in flag strings (e.g. glossary_miss:src->tgt) to HTML injection.
+        "flags": Markup("<br>").join(escape(f) for f in s.qa_flags),
         "status": labels.get(s.version_status, "—"),
     } for s in flagged]
     html = _QA_TMPL.render(

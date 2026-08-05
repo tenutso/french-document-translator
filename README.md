@@ -127,14 +127,27 @@ run `merge` for the final `.docx`, then `import-review reviewed.xlf` to update t
 ## Configuration
 
 Everything GPU/model/path-specific lives in [`config/pipeline.yaml`](config/pipeline.yaml).
-Switch `llm.profile` between `l4` (Tower+ 9B) and `a100` (Tower+ 72B) with one line.
+Switch `llm.profile` with one line to match the GPU tier:
+
+| profile | GPU | model |
+|---|---|---|
+| `l4` | 23GB L4 | Tower+ 9B (FP8) |
+| `a6000` | 48GB A6000/A40/L40 | Tower+ 9B (bf16) |
+| `a100` | 1× 80GB A100/H100 | Tower+ 9B (bf16, large KV cache) |
+| `a100_72b_x2` | 2× 80GB, `tp=2` | Tower+ 72B |
 
 ### L4 note (important)
 On a 23GB L4, Tower+ 9B in **bf16** leaves only ~0.7GB for KV cache, which starves
 concurrent requests and corrupts short segments. The `l4` profile therefore uses **FP8**
 (Ada-native), which frees ~8GB of KV cache and enables the full 8192 context with stable
-concurrency — with negligible quality loss for translation. Prefer a bigger GPU (A100/H100)
-for the 72B model when top quality matters.
+concurrency — with negligible quality loss for translation.
+
+### 72B note (important)
+Tower+ 72B does **not** fit on a single 80GB card. The bf16 checkpoint is ~145GB, and even
+with vLLM's online FP8 the weights alone (~73GB) exhaust a `0.92 × 80GB` budget — the engine
+OOMs in `fp8.py create_weights` before reserving any KV cache. Quantization happens after
+load and does not lower that ceiling. Use `a100_72b_x2` on a genuine multi-GPU pod; on one
+card, Tower+ 9B is the ceiling.
 
 ## Verified
 

@@ -32,9 +32,18 @@ def _tikal(cfg: Config) -> Path:
 
 def _run(cfg: Config, args: list[str], cwd: Path) -> None:
     env = os.environ.copy()
-    # tikal.sh calls `java`; make sure JAVA_HOME/bin is reachable.
-    if env.get("JAVA_HOME"):
-        env["PATH"] = f"{env['JAVA_HOME']}/bin:" + env.get("PATH", "")
+    # tikal.sh calls a bare `java`; make sure a JDK is on PATH even when the caller's
+    # shell never sourced .env.runtime (cfg.java_home falls back to paths.java_home).
+    java_home = cfg.java_home
+    if java_home:
+        env["JAVA_HOME"] = str(java_home)
+        env["PATH"] = f"{java_home}/bin:" + env.get("PATH", "")
+    elif not shutil.which("java"):
+        raise RuntimeError(
+            "No Java runtime found: `java` is not on PATH and paths.java_home in "
+            f"{cfg.path} does not contain bin/java. Run bootstrap.sh, or "
+            f"`source {cfg.path.parent.parent / '.env.runtime'}`."
+        )
     cmd = ["bash", str(_tikal(cfg)), *args]
     proc = subprocess.run(cmd, cwd=str(cwd), env=env, capture_output=True, text=True)
     if proc.returncode != 0:

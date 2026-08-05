@@ -65,6 +65,19 @@ class Config:
         return Path(os.environ.get("OKAPI_HOME", str(self.path_for("okapi_home"))))
 
     @property
+    def java_home(self) -> Path | None:
+        """JDK root for Tikal. $JAVA_HOME wins; else paths.java_home if it looks like a JDK.
+
+        Falls back to the config so the pipeline works in a shell that never sourced
+        .env.runtime (the usual cause of `tikal.sh: line 2: java: command not found`).
+        """
+        env = os.environ.get("JAVA_HOME")
+        if env:
+            return Path(env)
+        p = self.path_for("java_home")
+        return p if (p / "bin" / "java").exists() else None
+
+    @property
     def tesseract_bin(self) -> str:
         return os.environ.get("TESSERACT_BIN", self.raw["paths"].get("tesseract_bin", "tesseract"))
 

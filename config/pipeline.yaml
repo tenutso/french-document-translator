@@ -14,7 +14,7 @@ paths:
 # --- Translation LLM served by vLLM (OpenAI-compatible) ------------------------
 llm:
   # Active profile name (see profiles below). Switch this one line to change GPU tier.
-  profile: a6000
+  profile: a100
 
   base_url: http://127.0.0.1:8000/v1
   api_key: EMPTY                             # vLLM ignores it; must be non-empty
@@ -39,12 +39,30 @@ profiles:
     max_model_len: 8192
     tensor_parallel_size: 1
   a100:
+    # Single 80GB A100/H100. Tower+ 72B does NOT fit here: even with online FP8 the
+    # weights alone are ~73GB against a 0.92*80 = 73GB budget, so vLLM OOMs inside
+    # fp8.py create_weights before any KV cache is reserved (validated live on an
+    # A100-SXM4-80GB). Use the README-verified Tower+ 9B and spend the headroom on
+    # KV cache: ~18GB bf16 weights leave ~55GB of cache, far more concurrency than
+    # the L4. No FP8 — A100 is Ampere (SM80) with no native FP8 tensor cores, and
+    # there's no memory pressure to justify it. 8192 is Tower-Plus-9B's hard native
+    # max_position_embeddings (Gemma2); vLLM refuses to start above it.
+    model: Unbabel/Tower-Plus-9B
+    dtype: bfloat16
+    quantization: null
+    gpu_memory_utilization: 0.90
+    max_model_len: 8192
+    tensor_parallel_size: 1
+  a100_72b_x2:
+    # Tower+ 72B needs ~145GB just to hold the bf16 checkpoint, so it takes TWO 80GB
+    # cards (tp=2). Quantization happens after load and does not reduce that ceiling.
+    # Only select this profile on a multi-GPU pod — it OOMs on a single card.
     model: Unbabel/Tower-Plus-72B
     dtype: bfloat16
-    quantization: fp8                       # or "awq"/"fp8" on 48GB cards
+    quantization: fp8
     gpu_memory_utilization: 0.92
     max_model_len: 16384
-    tensor_parallel_size: 1
+    tensor_parallel_size: 2
   a6000:
     # 48GB Ampere (RTX A6000/A40/L40-class without native FP8 tensor cores — that's
     # Ada/Hopper only). Tower+ 72B needs ~145GB just to download the bf16 checkpoint
